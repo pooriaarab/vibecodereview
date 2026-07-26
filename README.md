@@ -1,5 +1,7 @@
 # vibereview
 
-**AI code review for agentic coding sessions**
+**AI review of your diff before you push.**
 
-Part of the **Vibe Suite** — companions for agentic coding CLIs. Coming soon.
+Catches what your agent missed; the offrouter-adjacent play.
+
+Part of the **Vibe Suite** — companions for agentic coding CLIs and the broader Vibe family. Coming soon.
