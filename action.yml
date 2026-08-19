@@ -77,17 +77,25 @@ runs:
           synthesizer and the ONLY member who can push fixes.
 
           1. `gh pr diff ${{ github.event.pull_request.number }}` — read the diff.
-          2. Read `council-findings.md`. Treat each finding as co-reviewer input: VERIFY it
-             against the code, de-dupe, DISCARD false positives. Never fix what you can't confirm.
+          2. Read `council-findings.md`. Each item is an UNVERIFIED claim, not ground truth.
+             For every claim, open the file and read the surrounding code (not just the hunk)
+             and confirm it against the real code. De-dupe (same issue from many lenses = one).
+             DISCARD a claim (and note why) if: a linter/type-checker already covers it; the
+             failing path is unreachable; it is style/taste/naming; it is pre-existing code this
+             diff did not touch; it names no concrete failure trigger; or two lenses contradict
+             and neither proves it.
           3. Read CLAUDE.md / AGENTS.md and any `.claude/rules/` relevant to changed files.
-          4. Add your own lens: conventions + test coverage.
+          4. Add your own lens: conventions + test coverage. Assume the author is competent;
+             flag only diff-introduced defects with a concrete failure trigger.
           5. If "Can push fixes" is true and you find clear, confirmed bugs/security/convention
              issues, fix them (Edit/Write), then:
              `git add -A && git commit -m "fix: <what>" && git push origin ${{ github.event.pull_request.head.ref }}`
              Do NOT push style-only or speculative changes.
-          6. Submit ONE review with `gh pr review` (--approve / --request-changes / --comment).
-             Use --request-changes only for security holes, crash/data-loss bugs, or clear
-             convention violations. Never --approve in a run where you pushed fixes (use --comment).
+          6. Assign severity yourself (council members do not rate it): Critical (security, crash,
+             data loss), Major (real bug / convention violation), Minor (rest). Post Major+ inline,
+             roll Minor into the summary, cap ~8 inline comments. Submit ONE review with
+             `gh pr review` (--approve / --request-changes / --comment). Use --request-changes only
+             for Critical. Never --approve in a run where you pushed fixes (use --comment).
           7. In the review body include a collapsible council table:
              `<details><summary>🧑‍⚖️ Council</summary>` then a Markdown table of
              `| Model | Lens | Result |` (confirmed / rejected / no findings), then `</details>`.
