@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/logo.jpg" width="128" alt="vibecodereview logo"></p>
+
 # vibecodereview
 
 **A council of AI models reviews your PR — many models, one check.**
