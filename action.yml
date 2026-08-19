@@ -1,0 +1,95 @@
+name: "vibereview"
+description: "LLM-council PR review: many models, diverse lenses, one self-healing GitHub check."
+branding:
+  icon: "eye"
+  color: "purple"
+
+inputs:
+  claude_code_oauth_token:
+    description: "Claude Code OAuth token (from `claude setup-token`). The chair model — synthesizes, fixes, posts the review."
+    required: true
+  github_token:
+    description: "Token for gh (PR read + review write). Pass ${{ github.token }}."
+    required: true
+    default: ${{ github.token }}
+  openai_api_key:
+    description: "OpenAI key — GPT/Codex council member (correctness lens). Omit to drop it."
+    required: false
+  gemini_api_key:
+    description: "Gemini key — performance lens. Omit to drop it."
+    required: false
+  moonshot_api_key:
+    description: "Moonshot/Kimi key — security lens. Omit to drop it."
+    required: false
+  openrouter_api_key:
+    description: "OpenRouter key — Grok/DeepSeek member (maintainability lens). Omit to drop it."
+    required: false
+  council_models:
+    description: "Optional CSV override: provider|model|Name|lens,... (providers: openai, gemini, moonshot, openrouter)."
+    required: false
+  can_push_fixes:
+    description: "If true, the chair may commit and push fixes to the PR branch."
+    required: false
+    default: "true"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Checkout PR branch
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        ref: ${{ github.event.pull_request.head.ref }}
+
+    - name: Configure git
+      shell: bash
+      run: |
+        git config user.name "vibereview[bot]"
+        git config user.email "vibereview@users.noreply.github.com"
+
+    - name: Council fan-out
+      shell: bash
+      continue-on-error: true
+      env:
+        GH_TOKEN: ${{ inputs.github_token }}
+        OPENAI_API_KEY: ${{ inputs.openai_api_key }}
+        GEMINI_API_KEY: ${{ inputs.gemini_api_key }}
+        MOONSHOT_API_KEY: ${{ inputs.moonshot_api_key }}
+        OPENROUTER_API_KEY: ${{ inputs.openrouter_api_key }}
+        COUNCIL_MODELS: ${{ inputs.council_models }}
+      run: |
+        gh pr diff ${{ github.event.pull_request.number }} > pr.diff || true
+        node "${{ github.action_path }}/scripts/council-review.mjs" pr.diff council-findings.md || true
+        echo "----- council-findings.md -----"; cat council-findings.md || true
+
+    - name: Chair review (Claude synthesizes, fixes, posts)
+      uses: anthropics/claude-code-action@v1
+      with:
+        claude_code_oauth_token: ${{ inputs.claude_code_oauth_token }}
+        use_commit_signing: true
+        allowed_bots: "*"
+        prompt: |
+          You chair an LLM council reviewing PR #${{ github.event.pull_request.number }} in ${{ github.repository }}.
+          Branch: ${{ github.event.pull_request.head.ref }}. Can push fixes: ${{ inputs.can_push_fixes }}.
+
+          Council members each reviewed this PR through one lens (correctness, performance,
+          security, maintainability) and wrote findings to `council-findings.md`. You are the
+          synthesizer and the ONLY member who can push fixes.
+
+          1. `gh pr diff ${{ github.event.pull_request.number }}` — read the diff.
+          2. Read `council-findings.md`. Treat each finding as co-reviewer input: VERIFY it
+             against the code, de-dupe, DISCARD false positives. Never fix what you can't confirm.
+          3. Read CLAUDE.md / AGENTS.md and any `.claude/rules/` relevant to changed files.
+          4. Add your own lens: conventions + test coverage.
+          5. If "Can push fixes" is true and you find clear, confirmed bugs/security/convention
+             issues, fix them (Edit/Write), then:
+             `git add -A && git commit -m "fix: <what>" && git push origin ${{ github.event.pull_request.head.ref }}`
+             Do NOT push style-only or speculative changes.
+          6. Submit ONE review with `gh pr review` (--approve / --request-changes / --comment).
+             Use --request-changes only for security holes, crash/data-loss bugs, or clear
+             convention violations. Never --approve in a run where you pushed fixes (use --comment).
+          7. In the review body include a collapsible council table:
+             `<details><summary>🧑‍⚖️ Council</summary>` then a Markdown table of
+             `| Model | Lens | Result |` (confirmed / rejected / no findings), then `</details>`.
+             If council was skipped, write "Council: skipped".
+        claude_args: '--allowed-tools "Bash(gh api:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr review:*),Bash(gh pr comment:*),Bash(git:*),Bash(jq:*),Bash(cat:*),Read,Glob,Grep,Edit,Write"'
