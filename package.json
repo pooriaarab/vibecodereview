@@ -1,0 +1,29 @@
+{
+  "name": "vibereview",
+  "version": "0.1.0",
+  "description": "LLM-council PR review: many models, diverse lenses, one self-healing GitHub check. Also reviews your local diff before you push.",
+  "type": "module",
+  "bin": {
+    "vibereview": "bin/vibereview.mjs"
+  },
+  "scripts": {
+    "selfcheck": "node scripts/council-review.mjs --selfcheck",
+    "mcp": "node mcp/server.mjs"
+  },
+  "files": [
+    "action.yml",
+    "scripts/",
+    "bin/",
+    "mcp/",
+    "skills/",
+    "AGENTS.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pooriaarab/vibereview.git"
+  },
+  "license": "MIT"
+}

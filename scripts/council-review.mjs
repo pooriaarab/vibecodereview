@@ -1,0 +1,202 @@
+#!/usr/bin/env node
+// LLM council: fan a PR diff out to several models — each on its own provider,
+// each with a distinct review lens — and write their findings to a markdown
+// file. Claude (in the workflow's claude-code-action step) reads that file,
+// de-dupes, validates, fixes, and posts the combined review.
+//
+// This script never blocks the PR: a member with no API key, or a failed
+// request, degrades to a note in the output, and the script always exits 0.
+//
+// Usage:
+//   node council-review.mjs <diff-file> <out-file>
+//   node council-review.mjs --selfcheck   # offline shape check, no network
+//
+// Env — one key per provider you want in the council (omit to drop that member):
+//   OPENAI_API_KEY      GPT / Codex        (api.openai.com)
+//   GEMINI_API_KEY      Gemini             (generativelanguage.googleapis.com)
+//   MOONSHOT_API_KEY    Kimi               (api.moonshot.ai)
+//   OPENROUTER_API_KEY  Grok / DeepSeek    (openrouter.ai)
+// Optional per-member model override: OPENAI_MODEL, GEMINI_MODEL,
+//   MOONSHOT_MODEL, OPENROUTER_MODEL.
+// Optional full override: COUNCIL_MODELS = CSV of "provider|model|Name|lens".
+
+import fs from "node:fs";
+
+const MAX_DIFF_CHARS = 180_000; // bound tokens/cost on large PRs
+const REQUEST_TIMEOUT_MS = 150_000;
+
+// All providers expose an OpenAI-compatible /chat/completions endpoint
+// (Gemini via its OpenAI-compat URL), so one request shape serves all.
+const PROVIDERS = {
+  openai: { url: "https://api.openai.com/v1/chat/completions", keyEnv: "OPENAI_API_KEY" },
+  gemini: {
+    url: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+    keyEnv: "GEMINI_API_KEY",
+  },
+  moonshot: { url: "https://api.moonshot.ai/v1/chat/completions", keyEnv: "MOONSHOT_API_KEY" },
+  openrouter: { url: "https://openrouter.ai/api/v1/chat/completions", keyEnv: "OPENROUTER_API_KEY" },
+};
+
+// Diverse lenses so each model catches what the others miss.
+const LENSES = {
+  correctness:
+    "logic bugs, incorrect conditionals, off-by-one, unhandled edge cases, race conditions, and SILENT FAILURES (swallowed errors, empty catch, fallbacks that hide real errors)",
+  performance:
+    "performance and efficiency: N+1 queries, unindexed/full-table scans, unnecessary re-renders, blocking I/O, memory blowups, and weak type design (types that allow invalid states)",
+  security:
+    "security (OWASP-aligned): broken authz/authn, tenant isolation gaps, injection, SSRF, secret exposure, unsafe redirects, and missing server-side input validation",
+  maintainability:
+    "maintainability and data integrity: dead/duplicated code, migration and data-loss risks, wrong or missing error handling, missing input validation, and broken API contracts",
+};
+
+const DEFAULT_MODELS = [
+  { provider: "openai", model: process.env.OPENAI_MODEL || "gpt-5.6", name: "GPT-5.6 (Codex)", lens: "correctness" },
+  { provider: "gemini", model: process.env.GEMINI_MODEL || "gemini-3.1-pro-preview", name: "Gemini 3 Pro", lens: "performance" },
+  { provider: "moonshot", model: process.env.MOONSHOT_MODEL || "kimi-k3", name: "Kimi K3", lens: "security" },
+  { provider: "openrouter", model: process.env.OPENROUTER_MODEL || "x-ai/grok-4.5", name: "Grok 4.5", lens: "maintainability" },
+];
+
+function parseModels() {
+  const csv = process.env.COUNCIL_MODELS?.trim();
+  if (!csv) return DEFAULT_MODELS;
+  return csv
+    .split(",")
+    .map((row) => {
+      const [provider, model, name, lens] = row.split("|").map((s) => s?.trim());
+      return { provider, model, name: name || model, lens: lens || "correctness" };
+    })
+    .filter((m) => m.provider && m.model && PROVIDERS[m.provider]);
+}
+
+function systemPrompt(lens) {
+  const focus = LENSES[lens] || LENSES.correctness;
+  return [
+    "You are one reviewer on a multi-model council reviewing a GitHub pull request diff.",
+    `Review ONLY through this lens: ${focus}.`,
+    "Report concrete, high-confidence findings you can point at a specific file and line. Skip style nits and anything outside your lens.",
+    "For each finding output exactly:",
+    "- **<🔴 Critical|🟠 Warning|🟡 Suggestion>** `path:line` — one-sentence problem, then a one-sentence fix.",
+    "If you find nothing real in your lens, reply with the single line: No findings.",
+    "Be terse. No preamble, no summary, no praise. Max 8 findings.",
+  ].join("\n");
+}
+
+async function callModel(model, diff) {
+  const provider = PROVIDERS[model.provider];
+  const apiKey = provider && process.env[provider.keyEnv]?.trim();
+  if (!apiKey) return { model, error: `skipped: ${provider?.keyEnv || model.provider} not set` };
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    const res = await fetch(provider.url, {
+      method: "POST",
+      signal: controller.signal,
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        "X-Title": "Content Rabbit PR Council",
+      },
+      body: JSON.stringify({
+        model: model.model,
+        messages: [
+          { role: "system", content: systemPrompt(model.lens) },
+          { role: "user", content: `PR diff:\n\n${diff}` },
+        ],
+      }),
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      return { model, error: `HTTP ${res.status}: ${body.slice(0, 300)}` };
+    }
+    const json = await res.json();
+    const text = json?.choices?.[0]?.message?.content?.trim();
+    if (!text) return { model, error: "empty response" };
+    return { model, text };
+  } catch (err) {
+    return { model, error: err?.name === "AbortError" ? "timed out" : String(err?.message || err) };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function buildFindingsMarkdown(results, { truncated } = {}) {
+  const lines = ["# 🧑‍⚖️ LLM Council findings", ""];
+  lines.push(
+    "Independent per-lens reviews from council models. Treat as co-reviewer input: de-dupe, verify each claim against the code, discard false positives, and only fix confidently-real issues.",
+    "",
+  );
+  if (truncated) {
+    lines.push("> ⚠️ Diff was truncated for length; council saw the first portion only.", "");
+  }
+  for (const r of results) {
+    lines.push(`## ${r.model.name} — ${r.model.lens} lens`, "");
+    if (r.error) lines.push(`_${r.error}_`, "");
+    else lines.push(r.text, "");
+  }
+  return lines.join("\n");
+}
+
+async function main() {
+  if (process.argv.includes("--selfcheck")) {
+    const md = buildFindingsMarkdown(
+      [
+        { model: { name: "M1", lens: "security" }, text: "- **🔴 Critical** `a.ts:10` — bad. fix it." },
+        { model: { name: "M2", lens: "performance" }, error: "timed out" },
+      ],
+      { truncated: true },
+    );
+    const ok =
+      md.includes("M1 — security lens") &&
+      md.includes("_timed out_") &&
+      md.includes("truncated") &&
+      md.includes("🔴 Critical");
+    if (!ok) throw new Error("selfcheck failed:\n" + md);
+    // also verify a member with no key resolves to a skip, not a throw
+    const r = await callModel({ provider: "openai", model: "x", name: "X", lens: "correctness" }, "diff");
+    if (!r.error?.includes("OPENAI_API_KEY")) throw new Error("selfcheck: missing-key path wrong: " + r.error);
+    console.log("selfcheck ok");
+    return;
+  }
+
+  const diffFile = process.argv[2];
+  const outFile = process.argv[3] || "council-findings.md";
+  const write = (md) => fs.writeFileSync(outFile, md);
+
+  const models = parseModels();
+  const withKey = models.filter((m) => process.env[PROVIDERS[m.provider]?.keyEnv]?.trim());
+  if (withKey.length === 0) {
+    const missing = models.map((m) => PROVIDERS[m.provider]?.keyEnv).join(", ");
+    write(`# 🧑‍⚖️ LLM Council findings\n\n_Council skipped: no provider keys set (${missing})._\n`);
+    console.log("No provider keys — council skipped.");
+    return;
+  }
+
+  let diff = diffFile && fs.existsSync(diffFile) ? fs.readFileSync(diffFile, "utf8") : "";
+  if (!diff.trim()) {
+    write("# 🧑‍⚖️ LLM Council findings\n\n_Council skipped: empty diff._\n");
+    console.log("Empty diff — council skipped.");
+    return;
+  }
+  const truncated = diff.length > MAX_DIFF_CHARS;
+  if (truncated) diff = diff.slice(0, MAX_DIFF_CHARS);
+
+  console.log(`Council: ${models.map((m) => `${m.name} [${m.provider}]`).join(", ")}`);
+  const results = await Promise.all(models.map((m) => callModel(m, diff)));
+  for (const r of results) console.log(`- ${r.model.name}: ${r.error ? "SKIP/ERR " + r.error : "ok"}`);
+
+  write(buildFindingsMarkdown(results, { truncated }));
+  console.log(`Wrote ${outFile}`);
+}
+
+main().catch((err) => {
+  // Never fail the workflow on council errors.
+  console.error("Council error (non-fatal):", err);
+  try {
+    fs.writeFileSync(
+      process.argv[3] || "council-findings.md",
+      `# 🧑‍⚖️ LLM Council findings\n\n_Council errored: ${String(err?.message || err)}_\n`,
+    );
+  } catch {}
+  process.exit(0);
+});

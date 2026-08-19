@@ -1,0 +1,28 @@
+name: vibereview
+on:
+  pull_request:
+    types: [opened, synchronize, review_requested]
+    paths-ignore: ["**.md"]
+concurrency:
+  group: vibereview-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  review:
+    if: github.event.pull_request.user.login != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      pull-requests: write
+      id-token: write
+    steps:
+      # Dogfood: review this repo's own PRs with the local action.
+      - uses: actions/checkout@v4
+      - uses: ./
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ github.token }}
+          openai_api_key: ${{ secrets.OPENAI_API_KEY }}
+          gemini_api_key: ${{ secrets.GEMINI_API_KEY }}
+          moonshot_api_key: ${{ secrets.MOONSHOT_API_KEY }}
+          openrouter_api_key: ${{ secrets.OPENROUTER_API_KEY }}
