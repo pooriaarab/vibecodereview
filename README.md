@@ -1,4 +1,4 @@
-# vibereview
+# vibecodereview
 
 **A council of AI models reviews your PR — many models, one check.**
 
@@ -25,8 +25,8 @@ Claude still reviews alone. Nothing here blocks the PR on a provider outage.
 ## Use it in a repo
 
 ```bash
-npx vibereview init          # writes .github/workflows/vibereview.yml
-npx vibereview secrets --repo owner/name   # prints the gh commands to set keys
+npx vibecodereview init          # writes .github/workflows/vibecodereview.yml
+npx vibecodereview secrets --repo owner/name   # prints the gh commands to set keys
 ```
 
 Set at least `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`). Add provider
@@ -35,7 +35,7 @@ keys to grow the council. Set them on **private** repos.
 Or wire the action directly:
 
 ```yaml
-- uses: pooriaarab/vibereview@v1
+- uses: pooriaarab/vibecodereview@v1
   with:
     claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
     github_token: ${{ github.token }}
@@ -52,13 +52,13 @@ overrides (`OPENROUTER_MODEL=deepseek/deepseek-v4-flash`, etc.).
 
 ```bash
 export OPENAI_API_KEY=... MOONSHOT_API_KEY=...   # whichever members you want
-vibereview review --base origin/main
+vibecodereview review --base origin/main
 ```
 
 ## As an MCP tool
 
 ```bash
-claude mcp add vibereview -- node /path/to/vibereview/mcp/server.mjs
+claude mcp add vibecodereview -- node /path/to/vibecodereview/mcp/server.mjs
 ```
 
 Exposes one tool, `council_review(diff)`. Provider keys come from the server env.

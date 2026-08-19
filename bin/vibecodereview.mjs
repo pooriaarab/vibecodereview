@@ -1,10 +1,10 @@
 #!/usr/bin/env node
-// vibereview CLI — set up council PR review in a repo, or review your local diff.
+// vibecodereview CLI — set up council PR review in a repo, or review your local diff.
 //
-//   vibereview init [--dir .]       Write .github/workflows/vibereview.yml into a repo.
-//   vibereview review [--base <ref>] Review your local diff with the council (prints findings).
-//   vibereview doctor               Show which provider keys are set in the environment.
-//   vibereview secrets [--repo o/r] Print the gh commands to set the required repo secrets.
+//   vibecodereview init [--dir .]       Write .github/workflows/vibecodereview.yml into a repo.
+//   vibecodereview review [--base <ref>] Review your local diff with the council (prints findings).
+//   vibecodereview doctor               Show which provider keys are set in the environment.
+//   vibecodereview secrets [--repo o/r] Print the gh commands to set the required repo secrets.
 //
 // Provider keys (env or repo secrets): CLAUDE_CODE_OAUTH_TOKEN (chair, required for CI),
 //   OPENAI_API_KEY, GEMINI_API_KEY, MOONSHOT_API_KEY, OPENROUTER_API_KEY (council members).
@@ -18,15 +18,15 @@ import os from "node:os";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, "..");
 const PROVIDER_KEYS = ["OPENAI_API_KEY", "GEMINI_API_KEY", "MOONSHOT_API_KEY", "OPENROUTER_API_KEY"];
-const REF = "pooriaarab/vibereview@v1"; // action ref repos pin to
+const REF = "pooriaarab/vibecodereview@v1"; // action ref repos pin to
 
-const WORKFLOW = `name: vibereview
+const WORKFLOW = `name: vibecodereview
 on:
   pull_request:
     types: [opened, synchronize, review_requested]
     paths-ignore: ["**.md", "docs/**"]
 concurrency:
-  group: vibereview-\${{ github.event.pull_request.number }}
+  group: vibecodereview-\${{ github.event.pull_request.number }}
   cancel-in-progress: true
 jobs:
   review:
@@ -58,11 +58,11 @@ function sh(cmd, args, opts = {}) {
 
 function init() {
   const dir = path.resolve(arg("dir", "."));
-  const dest = path.join(dir, ".github", "workflows", "vibereview.yml");
+  const dest = path.join(dir, ".github", "workflows", "vibecodereview.yml");
   fs.mkdirSync(path.dirname(dest), { recursive: true });
   fs.writeFileSync(dest, WORKFLOW);
   console.log(`Wrote ${dest}`);
-  console.log("\nNext: set repo secrets (see `vibereview secrets`), commit, open a PR.");
+  console.log("\nNext: set repo secrets (see `vibecodereview secrets`), commit, open a PR.");
 }
 
 function secrets() {
@@ -86,8 +86,8 @@ function review() {
     console.log("No diff to review (try --base origin/main).");
     return;
   }
-  const tmp = path.join(os.tmpdir(), `vibereview-${process.pid}.diff`);
-  const out = path.join(os.tmpdir(), `vibereview-${process.pid}.md`);
+  const tmp = path.join(os.tmpdir(), `vibecodereview-${process.pid}.diff`);
+  const out = path.join(os.tmpdir(), `vibecodereview-${process.pid}.md`);
   fs.writeFileSync(tmp, diff);
   sh("node", [path.join(ROOT, "scripts", "council-review.mjs"), tmp, out], { stdio: ["ignore", "inherit", "inherit"] });
   console.log("\n" + fs.readFileSync(out, "utf8"));
@@ -100,10 +100,10 @@ try {
   else if (cmd === "doctor") doctor();
   else if (cmd === "review") review();
   else {
-    console.log("vibereview <init|review|doctor|secrets>  (see `vibereview` header comment)");
+    console.log("vibecodereview <init|review|doctor|secrets>  (see `vibecodereview` header comment)");
     process.exit(cmd ? 1 : 0);
   }
 } catch (err) {
-  console.error("vibereview error:", err?.message || err);
+  console.error("vibecodereview error:", err?.message || err);
   process.exit(1);
 }

@@ -1,11 +1,11 @@
 #!/usr/bin/env node
-// vibereview MCP server (v0.1) — exposes one tool, `council_review`, that runs
+// vibecodereview MCP server (v0.1) — exposes one tool, `council_review`, that runs
 // the LLM council over a diff and returns the findings. Zero-dep: newline-
 // delimited JSON-RPC over stdio (the MCP stdio transport framing).
 //
 // Provider keys come from the environment (OPENAI_API_KEY, GEMINI_API_KEY,
 // MOONSHOT_API_KEY, OPENROUTER_API_KEY). Wire into a client, e.g. Claude Code:
-//   claude mcp add vibereview -- node /path/to/vibereview/mcp/server.mjs
+//   claude mcp add vibecodereview -- node /path/to/vibecodereview/mcp/server.mjs
 
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
@@ -38,8 +38,8 @@ const TOOL = {
 };
 
 function runCouncil(diff) {
-  const tmp = path.join(os.tmpdir(), `vibereview-mcp-${process.pid}-${Date.now()}.diff`);
-  const out = path.join(os.tmpdir(), `vibereview-mcp-${process.pid}-${Date.now()}.md`);
+  const tmp = path.join(os.tmpdir(), `vibecodereview-mcp-${process.pid}-${Date.now()}.diff`);
+  const out = path.join(os.tmpdir(), `vibecodereview-mcp-${process.pid}-${Date.now()}.md`);
   fs.writeFileSync(tmp, diff || "");
   execFileSync("node", [SCRIPT, tmp, out], { stdio: "ignore" });
   return fs.readFileSync(out, "utf8");
@@ -51,7 +51,7 @@ function handle(msg) {
     return reply(id, {
       protocolVersion: "2024-11-05",
       capabilities: { tools: {} },
-      serverInfo: { name: "vibereview", version: "0.1.0" },
+      serverInfo: { name: "vibecodereview", version: "0.1.0" },
     });
   }
   if (method === "notifications/initialized" || method?.startsWith("notifications/")) return;
