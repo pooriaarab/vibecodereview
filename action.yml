@@ -9,9 +9,8 @@ inputs:
     description: "Claude Code OAuth token (from `claude setup-token`). The chair model — synthesizes, fixes, posts the review."
     required: true
   github_token:
-    description: "Token for gh (PR read + review write). Pass ${{ github.token }}."
+    description: "Token for gh (PR read + review write). Pass ${{ github.token }} from the caller."
     required: true
-    default: ${{ github.token }}
   openai_api_key:
     description: "OpenAI key — GPT/Codex council member (correctness lens). Omit to drop it."
     required: false
