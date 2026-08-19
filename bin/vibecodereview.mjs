@@ -31,7 +31,7 @@ concurrency:
   group: vibecodereview-\${{ github.event.pull_request.number }}
   cancel-in-progress: true
 jobs:
-  review:
+  vibecodereview:
     # Only review PRs opened by the repo owner. On public repos this stops
     # arbitrary external PRs from spending your model budget (and blunts diff
     # prompt-injection from untrusted authors). Widen the allowlist if needed.

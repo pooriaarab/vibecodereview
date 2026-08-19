@@ -14,7 +14,11 @@ const repos = (process.argv.slice(2).filter((a) => a !== "--lenient").length
   ? process.argv.slice(2).filter((a) => a !== "--lenient")
   : (process.env.REPOS || "").split(",")).map((s) => s.trim()).filter(Boolean);
 
-const isVibe = (c) => /vibecodereview/i.test(c.name || c.workflowName || c.context || "");
+// The rolled-out workflow job is named `review` (older) or `vibecodereview`.
+const isVibe = (c) => {
+  const n = (c.name || c.workflowName || c.context || "").toLowerCase();
+  return /vibecodereview/.test(n) || n === "review";
+};
 const state = (c) => (c.conclusion || c.status || "").toUpperCase();
 const FAIL = ["FAILURE", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED"];
 const WAIT = ["PENDING", "QUEUED", "IN_PROGRESS", ""];
