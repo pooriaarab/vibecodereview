@@ -3,6 +3,8 @@
 //
 //   vibecodereview init [--dir .]       Write .github/workflows/vibecodereview.yml into a repo.
 //   vibecodereview review [--base <ref>] Review your local diff with the council (prints findings).
+//   vibecodereview review-prs [--post] [--repo <o/r>]... [<o/r>...]
+//                                       Review every open PR across repos; --post comments findings.
 //   vibecodereview doctor               Show which provider keys are set in the environment.
 //   vibecodereview secrets [--repo o/r] Print the gh commands to set the required repo secrets.
 //
@@ -93,14 +95,60 @@ function review() {
   console.log("\n" + fs.readFileSync(out, "utf8"));
 }
 
+function reviewPrs() {
+  const post = process.argv.includes("--post");
+  const repos = [];
+  const argv = process.argv.slice(3);
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === "--repo" && argv[i + 1]) repos.push(argv[++i]);
+    else if (!argv[i].startsWith("--")) repos.push(argv[i]);
+  }
+  if (repos.length === 0) {
+    console.log("Usage: vibecodereview review-prs [--post] [--repo <owner/repo>]... [<owner/repo>...]");
+    return;
+  }
+  let reviewed = 0,
+    errors = 0,
+    seq = 0;
+  for (const repo of repos) {
+    let prs;
+    try {
+      prs = JSON.parse(sh("gh", ["pr", "list", "--repo", repo, "--state", "open", "--json", "number"]));
+    } catch (err) {
+      errors++;
+      console.error(`${repo}: failed to list PRs: ${err?.message || err}`);
+      continue;
+    }
+    for (const { number } of prs) {
+      try {
+        const diff = sh("gh", ["pr", "diff", String(number), "--repo", repo]);
+        const tmp = path.join(os.tmpdir(), `vibecodereview-${process.pid}-${seq}.diff`);
+        const out = path.join(os.tmpdir(), `vibecodereview-${process.pid}-${seq}.md`);
+        seq++;
+        fs.writeFileSync(tmp, diff);
+        sh("node", [path.join(ROOT, "scripts", "council-review.mjs"), tmp, out], { stdio: ["ignore", "inherit", "inherit"] });
+        console.log(`\n=== ${repo}#${number} ===\n`);
+        console.log(fs.readFileSync(out, "utf8"));
+        if (post) sh("gh", ["pr", "comment", String(number), "--repo", repo, "--body-file", out]);
+        reviewed++;
+      } catch (err) {
+        errors++;
+        console.error(`${repo}#${number}: ${err?.message || err}`);
+      }
+    }
+  }
+  console.log(`\nDone: ${repos.length} repo(s), ${reviewed} PR(s) reviewed, ${errors} error(s).`);
+}
+
 const cmd = process.argv[2];
 try {
   if (cmd === "init") init();
   else if (cmd === "secrets") secrets();
   else if (cmd === "doctor") doctor();
   else if (cmd === "review") review();
+  else if (cmd === "review-prs") reviewPrs();
   else {
-    console.log("vibecodereview <init|review|doctor|secrets>  (see `vibecodereview` header comment)");
+    console.log("vibecodereview <init|review|review-prs|doctor|secrets>  (see `vibecodereview` header comment)");
     process.exit(cmd ? 1 : 0);
   }
 } catch (err) {
