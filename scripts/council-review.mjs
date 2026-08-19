@@ -16,6 +16,9 @@
 //   GEMINI_API_KEY      Gemini             (generativelanguage.googleapis.com)
 //   MOONSHOT_API_KEY    Kimi               (api.moonshot.ai)
 //   OPENROUTER_API_KEY  Grok / DeepSeek    (openrouter.ai)
+//   CUSTOM_API_KEY      Any OpenAI-compatible gateway — set CUSTOM_BASE_URL
+//                       to its /chat/completions URL (OpenRouter, a self-hosted
+//                       proxy, or a local OffRouter endpoint).
 // Optional per-member model override: OPENAI_MODEL, GEMINI_MODEL,
 //   MOONSHOT_MODEL, OPENROUTER_MODEL.
 // Optional full override: COUNCIL_MODELS = CSV of "provider|model|Name|lens".
@@ -35,6 +38,9 @@ const PROVIDERS = {
   },
   moonshot: { url: "https://api.moonshot.ai/v1/chat/completions", keyEnv: "MOONSHOT_API_KEY" },
   openrouter: { url: "https://openrouter.ai/api/v1/chat/completions", keyEnv: "OPENROUTER_API_KEY" },
+  // Generic OpenAI-compatible endpoint (OpenRouter, self-hosted proxy, local
+  // OffRouter). URL comes from env at call time; unset means the member skips.
+  custom: { url: process.env.CUSTOM_BASE_URL, keyEnv: "CUSTOM_API_KEY" },
 };
 
 // Diverse lenses so each model catches what the others miss.
@@ -89,6 +95,7 @@ function systemPrompt(lens) {
 
 async function callModel(model, diff) {
   const provider = PROVIDERS[model.provider];
+  if (provider && !provider.url) return { model, error: "skipped: CUSTOM_BASE_URL not set" };
   const apiKey = provider && process.env[provider.keyEnv]?.trim();
   if (!apiKey) return { model, error: `skipped: ${provider?.keyEnv || model.provider} not set` };
 
@@ -170,6 +177,17 @@ async function main() {
       if (savedKey !== undefined) process.env.OPENAI_API_KEY = savedKey;
     }
     if (!r.error?.includes("OPENAI_API_KEY")) throw new Error("selfcheck: missing-key path wrong: " + r.error);
+    // a custom member with no CUSTOM_BASE_URL must also skip, not throw — even
+    // when the ambient env sets one, so the check stays offline.
+    const savedUrl = PROVIDERS.custom.url;
+    PROVIDERS.custom.url = undefined;
+    let r2;
+    try {
+      r2 = await callModel({ provider: "custom", model: "x", name: "X", lens: "correctness" }, "diff");
+    } finally {
+      PROVIDERS.custom.url = savedUrl;
+    }
+    if (!r2.error?.includes("CUSTOM_BASE_URL")) throw new Error("selfcheck: custom no-url path wrong: " + r2.error);
     console.log("selfcheck ok");
     return;
   }
@@ -181,7 +199,7 @@ async function main() {
   const models = parseModels();
   if (models.length === 0) {
     write(
-      "# 🧑‍⚖️ LLM Council findings\n\n_Council skipped: COUNCIL_MODELS parsed to no valid members (expected `provider|model|Name|lens`; providers: openai, gemini, moonshot, openrouter)._\n",
+      "# 🧑‍⚖️ LLM Council findings\n\n_Council skipped: COUNCIL_MODELS parsed to no valid members (expected `provider|model|Name|lens`; providers: openai, gemini, moonshot, openrouter, custom)._\n",
     );
     console.log("No valid council members — skipped.");
     return;

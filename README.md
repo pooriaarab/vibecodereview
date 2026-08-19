@@ -50,12 +50,58 @@ Or wire the action directly:
 Swap models without code: `council_models` input, or the `*_MODEL` env
 overrides (`OPENROUTER_MODEL=deepseek/deepseek-v4-flash`, etc.).
 
+### Custom / OffRouter provider
+
+Point a council member at any OpenAI-compatible gateway: OpenRouter, a
+self-hosted proxy, or a local OffRouter endpoint. (OffRouter is a local
+router for coding agents; if it exposes an OpenAI-compatible
+`/v1/chat/completions`, set `CUSTOM_BASE_URL` to it.)
+
+```bash
+export CUSTOM_BASE_URL=https://your-gateway.example/v1/chat/completions
+export CUSTOM_API_KEY=...
+export COUNCIL_MODELS="custom|<model>|Name|lens"
+```
+
+No `CUSTOM_BASE_URL` → the member skips with a note, same as a missing key.
+
+## Set up across many repos
+
+`bin/rollout.mjs` rolls the action out to a fleet of repos. For each repo it
+sets the 5 secrets from your environment and opens one PR that adds the
+owner-gated workflow. It is idempotent: re-running re-sets secrets and
+reuses the branch and PR. It never merges.
+
+```bash
+node bin/rollout.mjs --dry-run owner/a owner/b   # preview; changes nothing
+node bin/rollout.mjs owner/a owner/b             # or REPOS="owner/a,owner/b"
+```
+
+Once the rollout PRs are green, merge them with `bin/merge-rollout.mjs`:
+
+```bash
+node bin/merge-rollout.mjs --lenient owner/a owner/b
+```
+
+It merges only PRs whose vibecodereview check passed. `--lenient` ignores
+unrelated red CI on the repo (safe: a rollout PR only adds one file). It
+never merges while the vibecodereview check is pending or failing.
+
 ## Review a local diff before you push
 
 ```bash
 export OPENAI_API_KEY=... MOONSHOT_API_KEY=...   # whichever members you want
 vibecodereview review --base origin/main
 ```
+
+## Review open PRs across repos
+
+```bash
+vibecodereview review-prs owner/a owner/b        # print findings per open PR
+vibecodereview review-prs --post --repo owner/a  # also comment on each PR
+```
+
+Needs an authenticated `gh`. One failing PR does not stop the batch.
 
 ## As an MCP tool
 
