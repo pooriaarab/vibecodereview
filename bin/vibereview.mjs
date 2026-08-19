@@ -30,7 +30,10 @@ concurrency:
   cancel-in-progress: true
 jobs:
   review:
-    if: github.event.pull_request.user.login != 'dependabot[bot]'
+    # Only review PRs opened by the repo owner. On public repos this stops
+    # arbitrary external PRs from spending your model budget (and blunts diff
+    # prompt-injection from untrusted authors). Widen the allowlist if needed.
+    if: github.event.pull_request.user.login == github.repository_owner
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions: { contents: write, pull-requests: write, id-token: write }

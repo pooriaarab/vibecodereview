@@ -8,7 +8,8 @@ concurrency:
   cancel-in-progress: true
 jobs:
   review:
-    if: github.event.pull_request.user.login != 'dependabot[bot]'
+    # Only review the owner's own PRs (cost + injection guard on public repos).
+    if: github.event.pull_request.user.login == github.repository_owner
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
