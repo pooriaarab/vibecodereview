@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 /**
- * rollout.mjs — roll out the vibereview council PR review to many repos.
+ * rollout.mjs — roll out the vibecodereview council PR review to many repos.
  *
  * For each repo (owned by pooriaarab), in order:
- *   1. Set the GitHub Actions secrets vibereview needs, from this process env.
- *   2. Skip the PR if `.github/workflows/vibereview.yml` already exists on the
+ *   1. Set the GitHub Actions secrets vibecodereview needs, from this process env.
+ *   2. Skip the PR if `.github/workflows/vibecodereview.yml` already exists on the
  *      default branch.
- *   3. Otherwise open a PR that adds the workflow (branch `add-vibereview`).
+ *   3. Otherwise open a PR that adds the workflow (branch `add-vibecodereview`).
  *      PRs are never merged here — a human reviews them.
  *
  * Usage:
@@ -36,12 +36,12 @@ const SECRET_NAMES = [
   'OPENROUTER_API_KEY',
 ];
 
-const WORKFLOW_PATH = '.github/workflows/vibereview.yml';
-const BRANCH = 'add-vibereview';
-const COMMIT_MESSAGE = 'Add vibereview council PR review';
-const PR_TITLE = 'Add vibereview council PR review';
+const WORKFLOW_PATH = '.github/workflows/vibecodereview.yml';
+const BRANCH = 'add-vibecodereview';
+const COMMIT_MESSAGE = 'Add vibecodereview council PR review';
+const PR_TITLE = 'Add vibecodereview council PR review';
 const PR_BODY =
-  'Adds owner-gated LLM-council PR review (pooriaarab/vibereview@v1). ' +
+  'Adds owner-gated LLM-council PR review (pooriaarab/vibecodereview@v1). ' +
   'Set secrets are handled separately. Review before merge.';
 
 // The `${{ ... }}` sequences are literal GitHub Actions syntax. They sit in
@@ -49,13 +49,13 @@ const PR_BODY =
 // literal.
 const WORKFLOW_YAML =
   [
-    'name: vibereview',
+    'name: vibecodereview',
     'on:',
     '  pull_request:',
     '    types: [opened, synchronize, review_requested]',
     '    paths-ignore: ["**.md", "docs/**"]',
     'concurrency:',
-    '  group: vibereview-${{ github.event.pull_request.number }}',
+    '  group: vibecodereview-${{ github.event.pull_request.number }}',
     '  cancel-in-progress: true',
     'jobs:',
     '  review:',
@@ -68,7 +68,7 @@ const WORKFLOW_YAML =
     '      pull-requests: write',
     '      id-token: write',
     '    steps:',
-    '      - uses: pooriaarab/vibereview@v1',
+    '      - uses: pooriaarab/vibecodereview@v1',
     '        with:',
     '          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}',
     '          github_token: ${{ github.token }}',

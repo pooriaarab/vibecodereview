@@ -1,4 +1,4 @@
-name: "vibereview"
+name: "vibecodereview"
 description: "LLM-council PR review: many models, diverse lenses, one self-healing GitHub check."
 branding:
   icon: "eye"
@@ -31,6 +31,10 @@ inputs:
     description: "If true, the chair may commit and push fixes to the PR branch."
     required: false
     default: "true"
+  max_fix_cycles:
+    description: "Stop auto-pushing fixes after this many consecutive bot commits (loop guard)."
+    required: false
+    default: "3"
 
 runs:
   using: "composite"
@@ -44,8 +48,8 @@ runs:
     - name: Configure git
       shell: bash
       run: |
-        git config user.name "vibereview[bot]"
-        git config user.email "vibereview@users.noreply.github.com"
+        git config user.name "vibecodereview[bot]"
+        git config user.email "vibecodereview@users.noreply.github.com"
 
     - name: Council fan-out
       shell: bash
@@ -62,6 +66,29 @@ runs:
         node "${{ github.action_path }}/scripts/council-review.mjs" pr.diff council-findings.md || true
         echo "----- council-findings.md -----"; cat council-findings.md || true
 
+    - name: Fix-cycle guard
+      id: cycle
+      shell: bash
+      run: |
+        # Count consecutive bot commits at HEAD. After the limit, stop pushing
+        # fixes (comment-only) so review->fix->re-review can't loop forever.
+        LIMIT="${{ inputs.max_fix_cycles }}"
+        COUNT=0
+        for SHA in $(git log --format='%H' -"$((LIMIT + 3))"); do
+          AUTHOR="$(git log -1 --format='%an' "$SHA")"
+          case "$AUTHOR" in
+            *"[bot]"|"vibecodereview"*) COUNT=$((COUNT + 1)) ;;
+            *) break ;;
+          esac
+        done
+        if [ "$COUNT" -ge "$LIMIT" ] || [ "${{ inputs.can_push_fixes }}" = "false" ]; then
+          echo "can_push=false" >> "$GITHUB_OUTPUT"
+        else
+          echo "can_push=true" >> "$GITHUB_OUTPUT"
+        fi
+        echo "cycles=$COUNT" >> "$GITHUB_OUTPUT"
+        echo "Consecutive bot commits at HEAD: $COUNT (limit $LIMIT)"
+
     - name: Chair review (Claude synthesizes, fixes, posts)
       uses: anthropics/claude-code-action@v1
       with:
@@ -70,7 +97,9 @@ runs:
         allowed_bots: "*"
         prompt: |
           You chair an LLM council reviewing PR #${{ github.event.pull_request.number }} in ${{ github.repository }}.
-          Branch: ${{ github.event.pull_request.head.ref }}. Can push fixes: ${{ inputs.can_push_fixes }}.
+          Branch: ${{ github.event.pull_request.head.ref }}. Can push fixes: ${{ steps.cycle.outputs.can_push }} (automated fix cycles so far: ${{ steps.cycle.outputs.cycles }}).
+
+          LOOP GUARD: if "Can push fixes" is false, DO NOT push any commits — leave a review comment only. If a prior cycle already tried to fix an issue and it persists, stop fixing it and flag it for a human instead of pushing again.
 
           Council members each reviewed this PR through one lens (correctness, performance,
           security, maintainability) and wrote findings to `council-findings.md`. You are the

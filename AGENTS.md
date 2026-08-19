@@ -1,7 +1,7 @@
-# AGENTS.md — vibereview
+# AGENTS.md — vibecodereview
 
 Council PR-review tool. One engine (`scripts/council-review.mjs`) drives three
-surfaces: a GitHub composite Action (`action.yml`), a CLI (`bin/vibereview.mjs`),
+surfaces: a GitHub composite Action (`action.yml`), a CLI (`bin/vibecodereview.mjs`),
 and an MCP server (`mcp/server.mjs`). Keep the engine the single source of truth —
 never fork its provider/lens logic into the surfaces.
 
@@ -12,7 +12,7 @@ never fork its provider/lens logic into the surfaces.
   Every failure is non-fatal; the script always exits 0. Has `--selfcheck`.
 - `action.yml` — checkout → council fan-out → `anthropics/claude-code-action@v1`
   (the chair: verifies, fixes, pushes, posts one review).
-- `bin/vibereview.mjs` — `init` / `review` / `doctor` / `secrets`.
+- `bin/vibecodereview.mjs` — `init` / `review` / `doctor` / `secrets`.
 - `mcp/server.mjs` — zero-dep stdio JSON-RPC, one tool `council_review(diff)`.
 
 ## Rules
@@ -26,5 +26,5 @@ never fork its provider/lens logic into the surfaces.
 
 ## Confidentiality
 
-vibereview sends diffs to third-party model providers. Use it on **personal /
+vibecodereview sends diffs to third-party model providers. Use it on **personal /
 private repos**. Do not point it at proprietary or employer code.

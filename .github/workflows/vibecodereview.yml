@@ -1,10 +1,10 @@
-name: vibereview
+name: vibecodereview
 on:
   pull_request:
     types: [opened, synchronize, review_requested]
     paths-ignore: ["**.md"]
 concurrency:
-  group: vibereview-${{ github.event.pull_request.number }}
+  group: vibecodereview-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 jobs:
   review:
