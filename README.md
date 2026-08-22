@@ -11,6 +11,14 @@ check heals itself toward green.
 
 Part of the **Vibe Suite**.
 
+## Demo
+
+A council of clay AI ninjas reviews a pull request — problem, deliberation,
+verdict, self-healing fix.
+
+▶ **[Watch the launch trailer](https://getvibe.dev/vibecodereview)** ·
+[16:9](assets/vibecodereview-trailer-16x9.mp4) · [9:16](assets/vibecodereview-trailer-9x16.mp4)
+
 ## The council
 
 | Member | Provider (called directly) | Secret | Lens |
