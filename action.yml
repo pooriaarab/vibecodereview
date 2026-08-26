@@ -34,7 +34,7 @@ inputs:
     required: false
     default: "true"
   max_fix_cycles:
-    description: "Stop auto-pushing fixes after this many consecutive bot commits (loop guard)."
+    description: "Stop auto-pushing fixes after this many of our own consecutive commits (loop guard). Each fix commit is a new `synchronize` event, so it re-runs every other pull_request workflow in the repo — budget this against how many you have. See 'What a fix cycle costs' in the README."
     required: false
     default: "3"
 
@@ -81,17 +81,18 @@ runs:
       id: cycle
       shell: bash
       run: |
-        # Count consecutive bot commits at HEAD. After the limit, stop pushing
-        # fixes (comment-only) so review->fix->re-review can't loop forever.
+        # Count our own consecutive commits at HEAD. After the limit, stop
+        # pushing fixes (comment-only) so review->fix->re-review can't loop
+        # forever.
         LIMIT="${{ inputs.max_fix_cycles }}"
         COUNT=0
-        for SHA in $(git log --format='%H' -"$((LIMIT + 3))"); do
-          AUTHOR="$(git log -1 --format='%an' "$SHA")"
-          case "$AUTHOR" in
-            *"[bot]"|"vibecodereview"*) COUNT=$((COUNT + 1)) ;;
-            *) break ;;
-          esac
-        done
+        # Only our own commits count against the budget. Matching any *[bot]
+        # author let an unrelated bot (dependabot, another action's self-heal)
+        # sitting at HEAD burn the fix budget and silently turn fixes off.
+        while IFS= read -r AUTHOR; do
+          [ "$AUTHOR" = "vibecodereview[bot]" ] || break
+          COUNT=$((COUNT + 1))
+        done < <(git log --format='%an' -"$((LIMIT + 3))")
         if [ "$COUNT" -ge "$LIMIT" ] || [ "${{ inputs.can_push_fixes }}" = "false" ]; then
           echo "can_push=false" >> "$GITHUB_OUTPUT"
         else

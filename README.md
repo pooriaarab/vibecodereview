@@ -73,6 +73,44 @@ export COUNCIL_MODELS="custom|<model>|Name|lens"
 
 No `CUSTOM_BASE_URL` → the member skips with a note, same as a missing key.
 
+## What a fix cycle costs
+
+When the chair pushes a fix, that is a real commit on the PR branch, so GitHub
+raises a `synchronize` event. Every *other* workflow in the repo that triggers on
+`pull_request` runs again. The cost does not show up against this action — it
+shows up as extra runs of your test, lint, build and e2e workflows.
+
+The arithmetic, for a repo with five `pull_request` workflows and the default
+`max_fix_cycles: 3`:
+
+```
+1 human push        -> 5 workflow runs
+3 chair fix commits -> 15 more
+                       20 runs for one PR
+```
+
+Two things to set, especially if agents open most of your PRs:
+
+- **Lower `max_fix_cycles`** to 1 or 2 on high-volume repos. Fixes past the
+  second pass are usually the chair arguing with itself, and each one costs a
+  full pipeline.
+- **Give every `pull_request` workflow a `concurrency` group** so a fix commit
+  cancels the run it superseded instead of stacking beside it. `init` already
+  writes one into `vibecodereview.yml`; hand-written workflows often lack it.
+
+```yaml
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+```
+
+Use `cancel-in-progress: true` for test, lint and scan workflows. Leave it
+`false`, or omit the group, on anything that deploys or runs migrations —
+cancelling those midway is worse than queueing.
+
+Set `can_push_fixes: false` to get review comments with no commits at all, which
+costs one pipeline per PR.
+
 ## Set up across many repos
 
 `bin/rollout.mjs` rolls the action out to a fleet of repos. For each repo it
