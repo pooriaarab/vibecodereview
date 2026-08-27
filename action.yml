@@ -71,6 +71,9 @@ runs:
         GEMINI_API_KEY: ${{ inputs.gemini_api_key }}
         MOONSHOT_API_KEY: ${{ inputs.moonshot_api_key }}
         OPENROUTER_API_KEY: ${{ inputs.openrouter_api_key }}
+        # Subscription-backed council seats (provider `claude` / `claude2`).
+        CLAUDE_CODE_OAUTH_TOKEN: ${{ inputs.claude_code_oauth_token }}
+        CLAUDE_CODE_OAUTH_TOKEN_2: ${{ inputs.claude_code_oauth_token_2 }}
         COUNCIL_MODELS: ${{ inputs.council_models }}
       run: |
         gh pr diff ${{ github.event.pull_request.number }} > pr.diff || true

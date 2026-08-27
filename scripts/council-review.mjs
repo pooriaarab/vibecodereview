@@ -41,6 +41,15 @@ const PROVIDERS = {
   // Generic OpenAI-compatible endpoint (OpenRouter, self-hosted proxy, local
   // OffRouter). URL comes from env at call time; unset means the member skips.
   custom: { url: process.env.CUSTOM_BASE_URL, keyEnv: "CUSTOM_API_KEY" },
+  // Subscription-backed seats. These do NOT post to a chat endpoint — there is
+  // no OpenAI-compatible URL that accepts a Claude Code OAuth token — so they
+  // shell the Claude Code CLI the action already installs for the chair. Cost
+  // comes out of the Claude subscription instead of a metered API key, which
+  // is the whole point: the metered keys are what keep running dry.
+  // `claude2` exists so a second subscription can hold its own seat rather
+  // than idling as the chair's failover token.
+  claude: { cli: true, keyEnv: "CLAUDE_CODE_OAUTH_TOKEN" },
+  claude2: { cli: true, keyEnv: "CLAUDE_CODE_OAUTH_TOKEN_2" },
 };
 
 // Diverse lenses so each model catches what the others miss.
@@ -93,8 +102,42 @@ function systemPrompt(lens) {
   ].join("\n");
 }
 
+async function callClaudeCli(model, diff, oauthToken) {
+  const { execFile } = await import("node:child_process");
+  const prompt = `${systemPrompt(model.lens)}\n\nPR diff:\n\n${diff}`;
+  return new Promise((resolve) => {
+    const child = execFile(
+      "claude",
+      ["-p", "--model", model.model],
+      {
+        timeout: REQUEST_TIMEOUT_MS,
+        maxBuffer: 32 * 1024 * 1024,
+        // Scope the token to this child. A seat must not inherit an ambient
+        // token from the runner, or two seats would silently share one
+        // subscription and the second would look like it ran when it did not.
+        env: { ...process.env, CLAUDE_CODE_OAUTH_TOKEN: oauthToken },
+      },
+      (err, stdout, stderr) => {
+        if (err) {
+          const why = err.killed ? "timed out" : String(stderr || err.message).slice(0, 300);
+          return resolve({ model, error: why });
+        }
+        const text = String(stdout || "").trim();
+        resolve(text ? { model, text } : { model, error: "empty response" });
+      },
+    );
+    // The prompt goes on stdin: a large diff blows past ARGV_MAX as an argv.
+    child.stdin?.end(prompt);
+  });
+}
+
 async function callModel(model, diff) {
   const provider = PROVIDERS[model.provider];
+  const cliToken = provider?.cli && process.env[provider.keyEnv]?.trim();
+  if (provider?.cli) {
+    if (!cliToken) return { model, error: `skipped: ${provider.keyEnv} not set` };
+    return callClaudeCli(model, diff, cliToken);
+  }
   if (provider && !provider.url) return { model, error: "skipped: CUSTOM_BASE_URL not set" };
   const apiKey = provider && process.env[provider.keyEnv]?.trim();
   if (!apiKey) return { model, error: `skipped: ${provider?.keyEnv || model.provider} not set` };
