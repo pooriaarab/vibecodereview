@@ -16,6 +16,11 @@
 //   GEMINI_API_KEY      Gemini             (generativelanguage.googleapis.com)
 //   MOONSHOT_API_KEY    Kimi               (api.moonshot.ai)
 //   OPENROUTER_API_KEY  Grok / DeepSeek    (openrouter.ai)
+//   CLAUDE_CODE_OAUTH_TOKEN[_2]  Claude subscription seats (providers
+//                       `claude` / `claude2`). These shell the Claude Code
+//                       CLI instead of POSTing — no chat endpoint accepts a
+//                       subscription OAuth token — so the cost lands on the
+//                       subscription rather than a metered API key.
 //   CUSTOM_API_KEY      Any OpenAI-compatible gateway — set CUSTOM_BASE_URL
 //                       to its /chat/completions URL (OpenRouter, a self-hosted
 //                       proxy, or a local OffRouter endpoint).
@@ -30,6 +35,7 @@
 import fs from "node:fs";
 
 const MAX_DIFF_CHARS = 180_000; // bound tokens/cost on large PRs
+const CLI_TIMEOUT_MS = Number(process.env.CLI_TIMEOUT_MS || 240_000);
 const REQUEST_TIMEOUT_MS = 150_000;
 
 // All providers expose an OpenAI-compatible /chat/completions endpoint
@@ -108,34 +114,68 @@ function systemPrompt(lens) {
 
 async function callClaudeCli(model, diff, oauthToken) {
   const { execFile } = await import("node:child_process");
-  // `claude -p` requires the prompt as a CLI argument — it does not accept a
-  // stdin-only prompt with no positional arg (stdin is documented as
-  // supplementary piped content, e.g. `cat file | claude -p "query"`). Keep
-  // the fixed, short lens instructions on argv and put the diff — which can
-  // be up to MAX_DIFF_CHARS and would blow past the per-arg ARGV_MAX limit —
-  // on stdin instead.
+  const os = await import("node:os");
+  // Short lens instructions on argv, the diff on stdin. Both forms work —
+  // `claude -p` does read a stdin-only prompt — but keeping the diff off argv
+  // is what avoids ARGV_MAX at MAX_DIFF_CHARS.
   const instructions = `${systemPrompt(model.lens)}\n\nReview the PR diff piped on stdin.`;
+  // Strip every other Anthropic auth source. The CLI PREFERS ANTHROPIC_API_KEY
+  // (and the Bedrock/Vertex switches) over a claude.ai login, so a caller that
+  // sets one at job level would silently take both seats off their own
+  // subscriptions — the precedence hole is invisible from the output.
+  const env = { ...process.env, CLAUDE_CODE_OAUTH_TOKEN: oauthToken };
+  for (const k of [
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
+    "ANTHROPIC_BASE_URL",
+    "CLAUDE_CODE_USE_BEDROCK",
+    "CLAUDE_CODE_USE_VERTEX",
+    "CLAUDE_CODE_OAUTH_TOKEN_2", // a seat must only ever hold its own token
+  ]) {
+    delete env[k];
+  }
   return new Promise((resolve) => {
     const child = execFile(
       "claude",
-      ["-p", instructions, "--model", model.model],
+      [
+        "-p",
+        instructions,
+        "--model",
+        model.model,
+        // No tools: the seat needs nothing but the diff on stdin. This also
+        // keeps an agentic loop from eating the timeout.
+        "--allowed-tools",
+        "",
+        "--max-turns",
+        "1",
+      ],
       {
-        timeout: REQUEST_TIMEOUT_MS,
+        timeout: CLI_TIMEOUT_MS,
         maxBuffer: 32 * 1024 * 1024,
-        // Scope the token to this child. A seat must not inherit an ambient
-        // token from the runner, or two seats would silently share one
-        // subscription and the second would look like it ran when it did not.
-        env: { ...process.env, CLAUDE_CODE_OAUTH_TOKEN: oauthToken },
+        env,
+        // NOT the PR checkout. `claude -p` skips the workspace-trust prompt and
+        // WILL execute a repo-local .claude/settings.json hook, and this step's
+        // env holds every API key plus GH_TOKEN. Running in the untrusted head
+        // branch would hand a PR author arbitrary execution with those secrets.
+        cwd: os.tmpdir(),
       },
       (err, stdout, stderr) => {
         if (err) {
-          const why = err.killed ? "timed out" : String(stderr || err.message).slice(0, 300);
+          // The CLI reports auth failures on STDOUT and exits 1, so stderr is
+          // empty exactly when the reason matters most (dead/expired token).
+          const why = err.killed
+            ? "timed out"
+            : String(stderr || stdout || err.message).slice(0, 300);
           return resolve({ model, error: why });
         }
         const text = String(stdout || "").trim();
         resolve(text ? { model, text } : { model, error: "empty response" });
       },
     );
+    // A pending write to a child killed mid-stream emits EPIPE. Unhandled, that
+    // is an uncaughtException that exits non-zero BEFORE the findings file is
+    // written — one hung seat would destroy every other seat's review.
+    child.stdin?.on("error", () => {});
     child.stdin?.end(diff);
   });
 }
@@ -240,19 +280,23 @@ async function main() {
       PROVIDERS.custom.url = savedUrl;
     }
     if (!r2.error?.includes("CUSTOM_BASE_URL")) throw new Error("selfcheck: custom no-url path wrong: " + r2.error);
-    // a claude (CLI-backed) member with no oauth token must also skip, not
-    // shell out — even when the ambient env sets one, so the check stays
-    // offline and never spawns the CLI.
-    const savedToken = process.env.CLAUDE_CODE_OAUTH_TOKEN;
-    delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
-    let r3;
-    try {
-      r3 = await callModel({ provider: "claude", model: "x", name: "X", lens: "correctness" }, "diff");
-    } finally {
-      if (savedToken !== undefined) process.env.CLAUDE_CODE_OAUTH_TOKEN = savedToken;
-    }
-    if (!r3.error?.includes("CLAUDE_CODE_OAUTH_TOKEN")) {
-      throw new Error("selfcheck: claude missing-token path wrong: " + r3.error);
+    // Both CLI seats with no token must skip WITHOUT spawning anything, so the
+    // check stays offline and does not depend on `claude` being installed.
+    for (const [prov, keyEnv] of [
+      ["claude", "CLAUDE_CODE_OAUTH_TOKEN"],
+      ["claude2", "CLAUDE_CODE_OAUTH_TOKEN_2"],
+    ]) {
+      const saved = process.env[keyEnv];
+      delete process.env[keyEnv];
+      let r3;
+      try {
+        r3 = await callModel({ provider: prov, model: "x", name: "X", lens: "security" }, "diff");
+      } finally {
+        if (saved !== undefined) process.env[keyEnv] = saved;
+      }
+      if (!r3.error?.includes(keyEnv)) {
+        throw new Error(`selfcheck: ${prov} missing-token path wrong: ${r3.error}`);
+      }
     }
     console.log("selfcheck ok");
     return;

@@ -27,7 +27,7 @@ inputs:
     description: "OpenRouter key — Grok/DeepSeek member (maintainability lens). Omit to drop it."
     required: false
   council_models:
-    description: "Optional CSV override: provider|model|Name|lens,... (providers: openai, gemini, moonshot, openrouter, custom, claude, claude2)."
+    description: "Optional CSV override: provider|model|Name|lens,... (providers: openai, gemini, moonshot, openrouter, custom, claude, claude2). `claude`/`claude2` are subscription-backed seats that shell the Claude Code CLI using claude_code_oauth_token / _2 instead of a metered API key."
     required: false
   can_push_fixes:
     description: "If true, the chair may commit and push fixes to the PR branch."
