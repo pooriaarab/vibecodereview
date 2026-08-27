@@ -123,6 +123,13 @@ async function callClaudeCli(model, diff, oauthToken) {
   // (and the Bedrock/Vertex switches) over a claude.ai login, so a caller that
   // sets one at job level would silently take both seats off their own
   // subscriptions — the precedence hole is invisible from the output.
+  //
+  // Also strip the unrelated secrets this step's env carries (GH_TOKEN, the
+  // other provider API keys). --allowed-tools "" and the os.tmpdir() cwd below
+  // already close the known ways a prompt-injected diff could get the CLI to
+  // read its env, but the seat never needs these values to do its job — don't
+  // leave them reachable as a second line of defense against a bypass in either
+  // of those controls.
   const env = { ...process.env, CLAUDE_CODE_OAUTH_TOKEN: oauthToken };
   for (const k of [
     "ANTHROPIC_API_KEY",
@@ -131,6 +138,12 @@ async function callClaudeCli(model, diff, oauthToken) {
     "CLAUDE_CODE_USE_BEDROCK",
     "CLAUDE_CODE_USE_VERTEX",
     "CLAUDE_CODE_OAUTH_TOKEN_2", // a seat must only ever hold its own token
+    "GH_TOKEN",
+    "OPENAI_API_KEY",
+    "GEMINI_API_KEY",
+    "MOONSHOT_API_KEY",
+    "OPENROUTER_API_KEY",
+    "CUSTOM_API_KEY",
   ]) {
     delete env[k];
   }
