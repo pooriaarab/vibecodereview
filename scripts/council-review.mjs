@@ -108,11 +108,17 @@ function systemPrompt(lens) {
 
 async function callClaudeCli(model, diff, oauthToken) {
   const { execFile } = await import("node:child_process");
-  const prompt = `${systemPrompt(model.lens)}\n\nPR diff:\n\n${diff}`;
+  // `claude -p` requires the prompt as a CLI argument — it does not accept a
+  // stdin-only prompt with no positional arg (stdin is documented as
+  // supplementary piped content, e.g. `cat file | claude -p "query"`). Keep
+  // the fixed, short lens instructions on argv and put the diff — which can
+  // be up to MAX_DIFF_CHARS and would blow past the per-arg ARGV_MAX limit —
+  // on stdin instead.
+  const instructions = `${systemPrompt(model.lens)}\n\nReview the PR diff piped on stdin.`;
   return new Promise((resolve) => {
     const child = execFile(
       "claude",
-      ["-p", "--model", model.model],
+      ["-p", instructions, "--model", model.model],
       {
         timeout: REQUEST_TIMEOUT_MS,
         maxBuffer: 32 * 1024 * 1024,
@@ -130,8 +136,7 @@ async function callClaudeCli(model, diff, oauthToken) {
         resolve(text ? { model, text } : { model, error: "empty response" });
       },
     );
-    // The prompt goes on stdin: a large diff blows past ARGV_MAX as an argv.
-    child.stdin?.end(prompt);
+    child.stdin?.end(diff);
   });
 }
 
