@@ -19,6 +19,10 @@
 //   CUSTOM_API_KEY      Any OpenAI-compatible gateway — set CUSTOM_BASE_URL
 //                       to its /chat/completions URL (OpenRouter, a self-hosted
 //                       proxy, or a local OffRouter endpoint).
+//   CLAUDE_CODE_OAUTH_TOKEN    Claude subscription seat (provider `claude`) —
+//   CLAUDE_CODE_OAUTH_TOKEN_2  a second seat (provider `claude2`). Shells the
+//                       Claude Code CLI instead of calling a chat endpoint;
+//                       opt in per member via COUNCIL_MODELS.
 // Optional per-member model override: OPENAI_MODEL, GEMINI_MODEL,
 //   MOONSHOT_MODEL, OPENROUTER_MODEL.
 // Optional full override: COUNCIL_MODELS = CSV of "provider|model|Name|lens".
@@ -231,6 +235,20 @@ async function main() {
       PROVIDERS.custom.url = savedUrl;
     }
     if (!r2.error?.includes("CUSTOM_BASE_URL")) throw new Error("selfcheck: custom no-url path wrong: " + r2.error);
+    // a claude (CLI-backed) member with no oauth token must also skip, not
+    // shell out — even when the ambient env sets one, so the check stays
+    // offline and never spawns the CLI.
+    const savedToken = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+    delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
+    let r3;
+    try {
+      r3 = await callModel({ provider: "claude", model: "x", name: "X", lens: "correctness" }, "diff");
+    } finally {
+      if (savedToken !== undefined) process.env.CLAUDE_CODE_OAUTH_TOKEN = savedToken;
+    }
+    if (!r3.error?.includes("CLAUDE_CODE_OAUTH_TOKEN")) {
+      throw new Error("selfcheck: claude missing-token path wrong: " + r3.error);
+    }
     console.log("selfcheck ok");
     return;
   }
@@ -242,7 +260,7 @@ async function main() {
   const models = parseModels();
   if (models.length === 0) {
     write(
-      "# 🧑‍⚖️ LLM Council findings\n\n_Council skipped: COUNCIL_MODELS parsed to no valid members (expected `provider|model|Name|lens`; providers: openai, gemini, moonshot, openrouter, custom)._\n",
+      "# 🧑‍⚖️ LLM Council findings\n\n_Council skipped: COUNCIL_MODELS parsed to no valid members (expected `provider|model|Name|lens`; providers: openai, gemini, moonshot, openrouter, custom, claude, claude2)._\n",
     );
     console.log("No valid council members — skipped.");
     return;

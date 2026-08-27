@@ -17,9 +17,12 @@ never fork its provider/lens logic into the surfaces.
 
 ## Rules
 
-- Zero runtime deps. Node ≥20, global `fetch` only. Do not add npm dependencies.
-- Providers: `openai`, `gemini`, `moonshot`, `openrouter`. Add one by extending
-  `PROVIDERS` + `DEFAULT_MODELS` in the engine only.
+- Zero runtime deps. Node ≥20, global `fetch` only, except the `claude`/`claude2`
+  providers, which shell the Claude Code CLI (no npm dependency added). Do not
+  add npm dependencies.
+- Providers: `openai`, `gemini`, `moonshot`, `openrouter`, `custom`, `claude`,
+  `claude2`. Add one by extending `PROVIDERS` (+ `DEFAULT_MODELS` if it should
+  be on by default) in the engine only.
 - A member with no API key must skip with a note, never throw.
 - A composite action's `inputs:` block must contain NO `${{ }}` expressions — not in a default AND not in a description string; GitHub parses them and fails at 'Set up job'. Callers pass github_token explicitly.
 - Secrets never land in git. CI secrets live in repo settings; local keys in env.
