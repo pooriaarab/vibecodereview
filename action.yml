@@ -270,7 +270,8 @@ runs:
                    --output-format json 2>/dev/null || true)"
           if printf '%s' "$out" | jq -e \
                '.is_error == true and .num_turns == 1 and .total_cost_usd == 0
-                and (.modelUsage | length) == 0' >/dev/null 2>&1; then
+                and (.modelUsage | type == "object" and length == 0)' \
+             >/dev/null 2>&1; then
             echo "dead" > "probe.$slot"
             # Say WHY. 401 means the token is revoked or stale and needs
             # re-minting with `claude setup-token`; 429 means the subscription
