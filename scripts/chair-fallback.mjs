@@ -108,7 +108,15 @@ function normalizeFindings(parsed) {
   if (bad.length) throw new Error(`chair reply had ${bad.length} finding(s) that were not objects`);
   // Severity is matched with === below, so "major" would slip past the gate
   // and let a substantive finding fall through to the model's own verdict.
-  for (const f of raw) f.severity = SEVERITIES[String(f.severity).toLowerCase()] ?? "Minor";
+  // Silently mapping an unrecognized severity to "Minor" would let "Critical "
+  // (stray whitespace) or "blocker" score as nothing and clear the way for an
+  // approve. Every downgrade path in this file is a way to lose a real finding,
+  // so trim, then refuse what we do not recognize.
+  for (const f of raw) {
+    const severity = SEVERITIES[String(f.severity).trim().toLowerCase()];
+    if (!severity) throw new Error(`chair reply used an unrecognized severity: ${JSON.stringify(f.severity)}`);
+    f.severity = severity;
+  }
   return raw;
 }
 
