@@ -134,6 +134,7 @@ runs:
     # "keep these in sync" comment; a third attempt would have made that three
     # copies of a 40-line prompt that must never drift.
     - name: Build chair prompt
+      id: prompt
       shell: bash
       env:
         VCR_PR: ${{ github.event.pull_request.number }}
@@ -187,17 +188,35 @@ runs:
         # with bash parameter expansion, reading them from the environment —
         # never by interpolating a GitHub context straight into a sed pattern,
         # which a branch name can break or inject through.
+        if [ -z "$VCR_PR" ] || [ -z "$VCR_BRANCH" ]; then
+          echo "::error::chair prompt inputs missing (pr='$VCR_PR' branch='$VCR_BRANCH')"
+          exit 1
+        fi
         PROMPT="$(cat "$RUNNER_TEMP/chair-prompt.txt")"
         PROMPT="${PROMPT//__PR__/$VCR_PR}"
         PROMPT="${PROMPT//__REPO__/$VCR_REPO}"
         PROMPT="${PROMPT//__BRANCH__/$VCR_BRANCH}"
         PROMPT="${PROMPT//__CANPUSH__/$VCR_CANPUSH}"
         PROMPT="${PROMPT//__CYCLES__/$VCR_CYCLES}"
+        # An empty prompt is the one failure this step can produce, and it fails
+        # SILENTLY downstream: claude-code-action skips and reports success, so
+        # the PR gets a green review check with no review behind it. Fail here
+        # instead, where the cause is obvious.
+        if [ ${#PROMPT} -lt 200 ] || case "$PROMPT" in *__PR__*|*__BRANCH__*) true;; *) false;; esac; then
+          echo "::error::chair prompt did not build (length ${#PROMPT}, placeholders may remain)"
+          exit 1
+        fi
+        # Publish as a STEP OUTPUT, not an env var. The `env` context is not
+        # available in a composite step's `with:` block, so passing the prompt
+        # through $GITHUB_ENV silently delivers an EMPTY prompt — and
+        # claude-code-action treats no prompt as "nothing to do", skips, and
+        # reports SUCCESS. That is a green check for a review that never ran.
+        # The `steps` context does reach `with:`.
         {
-          echo "VCR_CHAIR_PROMPT<<VCR_ENV_EOF"
+          echo "text<<VCR_OUT_EOF"
           printf '%s\n' "$PROMPT"
-          echo "VCR_ENV_EOF"
-        } >> "$GITHUB_ENV"
+          echo "VCR_OUT_EOF"
+        } >> "$GITHUB_OUTPUT"
 
     - name: Council fan-out (await)
       shell: bash
@@ -228,7 +247,7 @@ runs:
         claude_code_oauth_token: ${{ inputs.claude_code_oauth_token }}
         use_commit_signing: true
         allowed_bots: "*"
-        prompt: ${{ env.VCR_CHAIR_PROMPT }}
+        prompt: ${{ steps.prompt.outputs.text }}
         claude_args: '--allowed-tools "Bash(gh api:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr review:*),Bash(gh pr comment:*),Bash(git:*),Bash(jq:*),Bash(cat:*),Read,Glob,Grep,Edit,Write"'
 
     - name: Chair review (backup token)
@@ -240,7 +259,7 @@ runs:
         claude_code_oauth_token: ${{ inputs.claude_code_oauth_token_2 }}
         use_commit_signing: true
         allowed_bots: "*"
-        prompt: ${{ env.VCR_CHAIR_PROMPT }}
+        prompt: ${{ steps.prompt.outputs.text }}
         claude_args: '--allowed-tools "Bash(gh api:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr review:*),Bash(gh pr comment:*),Bash(git:*),Bash(jq:*),Bash(cat:*),Read,Glob,Grep,Edit,Write"'
 
     - name: Chair review (third token)
@@ -252,7 +271,7 @@ runs:
         claude_code_oauth_token: ${{ inputs.claude_code_oauth_token_3 }}
         use_commit_signing: true
         allowed_bots: "*"
-        prompt: ${{ env.VCR_CHAIR_PROMPT }}
+        prompt: ${{ steps.prompt.outputs.text }}
         claude_args: '--allowed-tools "Bash(gh api:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr review:*),Bash(gh pr comment:*),Bash(git:*),Bash(jq:*),Bash(cat:*),Read,Glob,Grep,Edit,Write"'
 
     # Surface the true result: green if any chair run succeeded; red if they all

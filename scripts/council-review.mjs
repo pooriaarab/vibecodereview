@@ -61,6 +61,34 @@ const LENSES = {
     "maintainability and data integrity: dead/duplicated code, migration and data-loss risks, wrong or missing error handling, missing input validation, and broken API contracts",
 };
 
+// A native provider key that is present but out of credit answers in well under
+// a second with 401/402/429 — the member simply vanishes from the council and
+// the chair reviews alone. Measured on 2026-08-27: on 47 of the 48 repos running
+// this action, three of the four default members were 429-ing (OpenAI
+// `insufficient_quota`, Gemini monthly spend cap, Moonshot suspended balance),
+// so the "council" was one model. OpenRouter fronts all of these vendors, so a
+// single funded key can carry every lens. Map each native model to its
+// OpenRouter id and retry there when the native call fails on auth or quota.
+const OPENROUTER_EQUIVALENT = {
+  "gpt-5.6": "openai/gpt-5.6",
+  "gpt-5.6-terra-pro": "openai/gpt-5.6-terra-pro",
+  "gemini-3.1-pro-preview": "google/gemini-3.1-pro-preview",
+  "kimi-k3": "moonshotai/kimi-k3",
+};
+
+// Statuses that mean "this key will not work today", as opposed to a transient
+// server fault. Retrying the SAME key on these is pointless; a different route
+// is the only thing that can help.
+const CREDENTIAL_FAILURE_STATUSES = [401, 402, 403, 429];
+
+function openRouterFallbackFor(model) {
+  if (model.provider === "openrouter") return null;
+  if (!process.env.OPENROUTER_API_KEY?.trim()) return null;
+  const mapped = OPENROUTER_EQUIVALENT[model.model] || (model.model.includes("/") ? model.model : null);
+  if (!mapped) return null;
+  return { ...model, provider: "openrouter", model: mapped };
+}
+
 const DEFAULT_MODELS = [
   { provider: "openai", model: process.env.OPENAI_MODEL || "gpt-5.6", name: "GPT-5.6 (Codex)", lens: "correctness" },
   { provider: "gemini", model: process.env.GEMINI_MODEL || "gemini-3.1-pro-preview", name: "Gemini 3 Pro", lens: "performance" },
@@ -128,7 +156,7 @@ async function callModel(model, diff) {
     });
     if (!res.ok) {
       const body = await res.text().catch(() => "");
-      return timed({ model, error: `HTTP ${res.status}: ${body.slice(0, 300)}` });
+      return timed({ model, error: `HTTP ${res.status}: ${body.slice(0, 300)}`, status: res.status });
     }
     const json = await res.json();
     const text = json?.choices?.[0]?.message?.content?.trim();
@@ -139,6 +167,22 @@ async function callModel(model, diff) {
   } finally {
     clearTimeout(timer);
   }
+}
+
+// One retry, on a different route, only for a credential/quota failure. A
+// member already on OpenRouter has nowhere to fall back to, and a genuine model
+// error must NOT be retried — that would double the cost of every real failure.
+async function callModelWithFallback(model, diff) {
+  const first = await callModel(model, diff);
+  if (!first.error || !CREDENTIAL_FAILURE_STATUSES.includes(first.status)) return first;
+  const fallback = openRouterFallbackFor(model);
+  if (!fallback) return first;
+  console.log(`- ${model.name}: ${model.provider} returned ${first.status}; retrying via openrouter`);
+  const second = await callModel(fallback, diff);
+  if (second.error) {
+    return { ...second, error: `${model.provider} HTTP ${first.status}, openrouter: ${second.error}` };
+  }
+  return { ...second, model: { ...fallback, name: `${model.name} (via OpenRouter)` } };
 }
 
 function buildFindingsMarkdown(results, { truncated } = {}) {
@@ -231,7 +275,7 @@ async function main() {
 
   console.log(`Council: ${models.map((m) => `${m.name} [${m.provider}]`).join(", ")}`);
   const councilStartedAt = Date.now();
-  const results = await Promise.all(models.map((m) => callModel(m, diff)));
+  const results = await Promise.all(models.map((m) => callModelWithFallback(m, diff)));
   for (const r of results) {
     const took = r.ms === undefined ? "" : ` (${(r.ms / 1000).toFixed(1)}s)`;
     console.log(`- ${r.model.name}${took}: ${r.error ? "SKIP/ERR " + r.error : "ok"}`);
