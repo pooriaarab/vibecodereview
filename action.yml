@@ -29,6 +29,10 @@ inputs:
   openrouter_api_key:
     description: "OpenRouter key — Grok/DeepSeek member (maintainability lens). Omit to drop it."
     required: false
+  chair_fallback_model:
+    description: "Model for the OpenRouter fallback chair, used only when every Claude OAuth token fails. Defaults to anthropic/claude-sonnet-5 — the same model the primary chair runs — so the fallback review reads like the real one. Set empty-string behaviour by omitting; omit openrouter_api_key to disable the fallback entirely."
+    required: false
+    default: "anthropic/claude-sonnet-5"
   council_models:
     description: "Optional CSV override: provider|model|Name|lens,... (providers: openai, gemini, moonshot, openrouter)."
     required: false
@@ -278,13 +282,36 @@ runs:
     # failed. Without this, continue-on-error would mask a genuine failure as
     # success. A chair that dies in ~0.5s at $0 cost with one turn is a dead
     # token, not a bad review — check the subscription before the prompt.
+    # Last resort. Every Claude token has failed, so the choice is between a
+    # weaker review and none at all. On 2026-08-27 both subscriptions capped out
+    # at once and the whole fleet lost its review for days — a Claude-only chair
+    # makes one vendor's quota a single point of failure for every repo.
+    - name: Chair fallback (OpenRouter)
+      id: chair_fallback
+      if: >-
+        steps.chair_primary.outcome == 'failure' &&
+        steps.chair_backup.outcome != 'success' &&
+        steps.chair_third.outcome != 'success' &&
+        inputs.openrouter_api_key != ''
+      continue-on-error: true
+      shell: bash
+      env:
+        OPENROUTER_API_KEY: ${{ inputs.openrouter_api_key }}
+        GH_TOKEN: ${{ inputs.github_token }}
+        GITHUB_REPOSITORY: ${{ github.repository }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+        CHAIR_FALLBACK_MODEL: ${{ inputs.chair_fallback_model }}
+      run: node "${{ github.action_path }}/scripts/chair-fallback.mjs" pr.diff council-findings.md
+
     - name: Chair result gate
       shell: bash
       run: |
         P="${{ steps.chair_primary.outcome }}"
         B="${{ steps.chair_backup.outcome }}"
         T="${{ steps.chair_third.outcome }}"
+        F="${{ steps.chair_fallback.outcome }}"
         if [ "$P" = "success" ]; then echo "chair: primary token succeeded"; exit 0; fi
         if [ "$B" = "success" ]; then echo "chair: primary failed ($P); backup token succeeded"; exit 0; fi
         if [ "$T" = "success" ]; then echo "chair: primary and backup failed; third token succeeded"; exit 0; fi
-        echo "chair review failed (primary=$P, backup=${B:-skipped}, third=${T:-skipped})"; exit 1
+        if [ "$F" = "success" ]; then echo "chair: all Claude tokens failed; OpenRouter fallback posted the review"; exit 0; fi
+        echo "chair review failed (primary=$P, backup=${B:-skipped}, third=${T:-skipped}, fallback=${F:-skipped})"; exit 1
