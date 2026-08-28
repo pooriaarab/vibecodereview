@@ -45,26 +45,32 @@ function runCouncil(diff) {
   return fs.readFileSync(out, "utf8");
 }
 
-function handle(msg) {
-  const { id, method, params } = msg;
-  if (method === "initialize") {
-    return reply(id, {
+function callTool(id, params) {
+  if (params?.name !== "council_review") return fail(id, -32601, `Unknown tool: ${params?.name}`);
+  try {
+    const text = runCouncil(params?.arguments?.diff);
+    return reply(id, { content: [{ type: "text", text }] });
+  } catch (err) {
+    return reply(id, { content: [{ type: "text", text: `Council error: ${err?.message || err}` }], isError: true });
+  }
+}
+
+const METHODS = {
+  initialize: (id) =>
+    reply(id, {
       protocolVersion: "2024-11-05",
       capabilities: { tools: {} },
       serverInfo: { name: "vibecodereview", version: "0.1.0" },
-    });
-  }
+    }),
+  "tools/list": (id) => reply(id, { tools: [TOOL] }),
+  "tools/call": callTool,
+};
+
+function handle(msg) {
+  const { id, method, params } = msg;
   if (method === "notifications/initialized" || method?.startsWith("notifications/")) return;
-  if (method === "tools/list") return reply(id, { tools: [TOOL] });
-  if (method === "tools/call") {
-    if (params?.name !== "council_review") return fail(id, -32601, `Unknown tool: ${params?.name}`);
-    try {
-      const text = runCouncil(params?.arguments?.diff);
-      return reply(id, { content: [{ type: "text", text }] });
-    } catch (err) {
-      return reply(id, { content: [{ type: "text", text: `Council error: ${err?.message || err}` }], isError: true });
-    }
-  }
+  const fn = Object.hasOwn(METHODS, method) ? METHODS[method] : undefined;
+  if (fn) return fn(id, params);
   if (id !== undefined) fail(id, -32601, `Unknown method: ${method}`);
 }
 

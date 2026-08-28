@@ -97,48 +97,59 @@ function review() {
   console.log("\n" + fs.readFileSync(out, "utf8"));
 }
 
-function reviewPrs() {
-  const post = process.argv.includes("--post");
+let prSeq = 0;
+
+function parseRepoArgs(argv) {
   const repos = [];
-  const argv = process.argv.slice(3);
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--repo" && argv[i + 1]) repos.push(argv[++i]);
     else if (!argv[i].startsWith("--")) repos.push(argv[i]);
   }
+  return repos;
+}
+
+function reviewOnePr(repo, number, post) {
+  const diff = sh("gh", ["pr", "diff", String(number), "--repo", repo]);
+  const seq = prSeq++;
+  const tmp = path.join(os.tmpdir(), `vibecodereview-${process.pid}-${seq}.diff`);
+  const out = path.join(os.tmpdir(), `vibecodereview-${process.pid}-${seq}.md`);
+  fs.writeFileSync(tmp, diff);
+  sh("node", [path.join(ROOT, "scripts", "council-review.mjs"), tmp, out], { stdio: ["ignore", "inherit", "inherit"] });
+  console.log(`\n=== ${repo}#${number} ===\n`);
+  console.log(fs.readFileSync(out, "utf8"));
+  if (post) sh("gh", ["pr", "comment", String(number), "--repo", repo, "--body-file", out]);
+}
+
+function reviewRepoPrs(repo, post, counts) {
+  let prs;
+  try {
+    prs = JSON.parse(sh("gh", ["pr", "list", "--repo", repo, "--state", "open", "--json", "number"]));
+  } catch (err) {
+    counts.errors++;
+    console.error(`${repo}: failed to list PRs: ${err?.message || err}`);
+    return;
+  }
+  for (const { number } of prs) {
+    try {
+      reviewOnePr(repo, number, post);
+      counts.reviewed++;
+    } catch (err) {
+      counts.errors++;
+      console.error(`${repo}#${number}: ${err?.message || err}`);
+    }
+  }
+}
+
+function reviewPrs() {
+  const post = process.argv.includes("--post");
+  const repos = parseRepoArgs(process.argv.slice(3));
   if (repos.length === 0) {
     console.log("Usage: vibecodereview review-prs [--post] [--repo <owner/repo>]... [<owner/repo>...]");
     return;
   }
-  let reviewed = 0,
-    errors = 0,
-    seq = 0;
-  for (const repo of repos) {
-    let prs;
-    try {
-      prs = JSON.parse(sh("gh", ["pr", "list", "--repo", repo, "--state", "open", "--json", "number"]));
-    } catch (err) {
-      errors++;
-      console.error(`${repo}: failed to list PRs: ${err?.message || err}`);
-      continue;
-    }
-    for (const { number } of prs) {
-      try {
-        const diff = sh("gh", ["pr", "diff", String(number), "--repo", repo]);
-        const tmp = path.join(os.tmpdir(), `vibecodereview-${process.pid}-${seq}.diff`);
-        const out = path.join(os.tmpdir(), `vibecodereview-${process.pid}-${seq}.md`);
-        seq++;
-        fs.writeFileSync(tmp, diff);
-        sh("node", [path.join(ROOT, "scripts", "council-review.mjs"), tmp, out], { stdio: ["ignore", "inherit", "inherit"] });
-        console.log(`\n=== ${repo}#${number} ===\n`);
-        console.log(fs.readFileSync(out, "utf8"));
-        if (post) sh("gh", ["pr", "comment", String(number), "--repo", repo, "--body-file", out]);
-        reviewed++;
-      } catch (err) {
-        errors++;
-        console.error(`${repo}#${number}: ${err?.message || err}`);
-      }
-    }
-  }
+  const counts = { reviewed: 0, errors: 0 };
+  for (const repo of repos) reviewRepoPrs(repo, post, counts);
+  const { reviewed, errors } = counts;
   console.log(`\nDone: ${repos.length} repo(s), ${reviewed} PR(s) reviewed, ${errors} error(s).`);
 }
 
