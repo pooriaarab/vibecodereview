@@ -30,6 +30,11 @@ import { execFileSync } from 'node:child_process';
 
 const SECRET_NAMES = [
   'CLAUDE_CODE_OAUTH_TOKEN',
+  // The failover tokens. Leaving these out of the roster meant a rollout
+  // wrote a workflow that could only ever use ONE subscription, so the whole
+  // fleet went down together the moment that one capped out.
+  'CLAUDE_CODE_OAUTH_TOKEN_2',
+  'CLAUDE_CODE_OAUTH_TOKEN_3',
   'OPENAI_API_KEY',
   'GEMINI_API_KEY',
   'MOONSHOT_API_KEY',
@@ -71,6 +76,8 @@ const WORKFLOW_YAML =
     '      - uses: pooriaarab/vibecodereview@v1',
     '        with:',
     '          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}',
+    '          claude_code_oauth_token_2: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN_2 }}',
+    '          claude_code_oauth_token_3: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN_3 }}',
     '          github_token: ${{ github.token }}',
     '          openai_api_key: ${{ secrets.OPENAI_API_KEY }}',
     '          gemini_api_key: ${{ secrets.GEMINI_API_KEY }}',
