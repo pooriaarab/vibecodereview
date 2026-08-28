@@ -11,6 +11,9 @@ inputs:
   claude_code_oauth_token_2:
     description: "Backup Claude Code OAuth token (a second subscription). Used only if the chair run with the primary token fails (e.g. rate-limit / quota exhaustion). Omit to disable failover."
     required: false
+  claude_code_oauth_token_3:
+    description: "Third Claude Code OAuth token. Used only if BOTH the primary and backup chair runs fail. A two-deep chain leaves the whole fleet on one subscription once the primary caps out, which is how a fleet-wide outage happens. Omit to keep the chain two deep."
+    required: false
   github_token:
     description: "Token for gh (PR read + review write). Pass the workflow github.token from the caller."
     required: true
@@ -37,14 +40,26 @@ inputs:
     description: "Stop auto-pushing fixes after this many of our own consecutive commits (loop guard). Each fix commit is a new `synchronize` event, so it re-runs every other pull_request workflow in the repo — budget this against how many you have. See 'What a fix cycle costs' in the README."
     required: false
     default: "3"
+  checkout_depth:
+    description: "Commits to fetch. The review only ever needs the diff (fetched from the API) plus enough history for the fix-cycle guard, so a full clone is wasted I/O on a large repo. Must exceed max_fix_cycles + 3. Set to 0 for a full clone."
+    required: false
+    default: "50"
+  council_timeout_ms:
+    description: "Per-member deadline for the council fan-out. Members run in parallel, so this is the council's worst-case wall time. Omit for the 90s default."
+    required: false
+    default: ""
 
 runs:
   using: "composite"
   steps:
+    # A full-history clone is pure waste here: the diff comes from the API and
+    # the only local history the review reads is the handful of commits the
+    # fix-cycle guard counts. On a large repo `fetch-depth: 0` cost ~6s against
+    # ~2s shallow, on every PR, in every repo.
     - name: Checkout PR branch
       uses: actions/checkout@v4
       with:
-        fetch-depth: 0
+        fetch-depth: ${{ inputs.checkout_depth }}
         ref: ${{ github.event.pull_request.head.ref }}
 
     - name: Configure git
@@ -53,16 +68,11 @@ runs:
         git config user.name "vibecodereview[bot]"
         git config user.email "vibecodereview@users.noreply.github.com"
 
-    - name: Install Claude Code CLI
-      # anthropics/claude-code-action expects the Claude Code native binary at
-      # ~/.local/bin/claude; install it here so the chair step never dies with
-      # "native binary not found". GITHUB_PATH persists into later steps.
-      shell: bash
-      run: |
-        curl -fsSL https://claude.ai/install.sh | bash
-        echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-
-    - name: Council fan-out
+    # The council is network-bound and the setup below is not, so start the
+    # fan-out here and collect it just before the chair. Everything between the
+    # two steps — the CLI install, the fix-cycle guard, the prompt build — now
+    # runs inside the council's own latency instead of after it.
+    - name: Council fan-out (start)
       shell: bash
       continue-on-error: true
       env:
@@ -72,10 +82,28 @@ runs:
         MOONSHOT_API_KEY: ${{ inputs.moonshot_api_key }}
         OPENROUTER_API_KEY: ${{ inputs.openrouter_api_key }}
         COUNCIL_MODELS: ${{ inputs.council_models }}
+        COUNCIL_TIMEOUT_MS: ${{ inputs.council_timeout_ms }}
       run: |
         gh pr diff ${{ github.event.pull_request.number }} > pr.diff || true
-        node "${{ github.action_path }}/scripts/council-review.mjs" pr.diff council-findings.md || true
-        echo "----- council-findings.md -----"; cat council-findings.md || true
+        nohup node "${{ github.action_path }}/scripts/council-review.mjs" \
+          pr.diff council-findings.md > council.log 2>&1 &
+        echo $! > council.pid
+        echo "council started (pid $(cat council.pid))"
+
+    - name: Install Claude Code CLI
+      # anthropics/claude-code-action expects the Claude Code native binary at
+      # ~/.local/bin/claude; install it here so the chair step never dies with
+      # "native binary not found". GITHUB_PATH persists into later steps.
+      # Skip the download when a caller workflow already installed it — several
+      # do, and paying for the same install twice cost ~5s a run.
+      shell: bash
+      run: |
+        echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+        if command -v claude >/dev/null 2>&1 || [ -x "$HOME/.local/bin/claude" ]; then
+          echo "Claude Code CLI already present; skipping install."
+        else
+          curl -fsSL https://claude.ai/install.sh | bash
+        fi
 
     - name: Fix-cycle guard
       id: cycle
@@ -101,8 +129,116 @@ runs:
         echo "cycles=$COUNT" >> "$GITHUB_OUTPUT"
         echo "Consecutive bot commits at HEAD: $COUNT (limit $LIMIT)"
 
-    # NOTE: the primary and backup chair steps below run the SAME prompt with a
-    # different OAuth token. Keep their `prompt:` / `claude_args:` blocks in sync.
+    # ONE chair prompt, built once into the environment and reused by every
+    # failover attempt below. It used to be pasted inline per attempt with a
+    # "keep these in sync" comment; a third attempt would have made that three
+    # copies of a 40-line prompt that must never drift.
+    - name: Build chair prompt
+      id: prompt
+      shell: bash
+      env:
+        VCR_PR: ${{ github.event.pull_request.number }}
+        VCR_REPO: ${{ github.repository }}
+        VCR_BRANCH: ${{ github.event.pull_request.head.ref }}
+        VCR_CANPUSH: ${{ steps.cycle.outputs.can_push }}
+        VCR_CYCLES: ${{ steps.cycle.outputs.cycles }}
+      run: |
+        cat > "$RUNNER_TEMP/chair-prompt.txt" <<'VCR_PROMPT_EOF'
+        You chair an LLM council reviewing PR #__PR__ in __REPO__.
+        Branch: __BRANCH__. Can push fixes: __CANPUSH__ (automated fix cycles so far: __CYCLES__).
+
+        LOOP GUARD: if "Can push fixes" is false, DO NOT push any commits — leave a review comment only. If a prior cycle already tried to fix an issue and it persists, stop fixing it and flag it for a human instead of pushing again.
+
+        Council members each reviewed this PR through one lens (correctness, performance,
+        security, maintainability) and wrote findings to `council-findings.md`. You are the
+        synthesizer and the ONLY member who can push fixes.
+
+        1. Read the diff. It is ALREADY on disk at `pr.diff` — `cat pr.diff`. Do not spend a
+           turn re-fetching it. Only if that file is missing or empty, fall back to
+           `gh pr diff __PR__`.
+        2. Read `council-findings.md`. Each item is an UNVERIFIED claim, not ground truth.
+           For every claim, open the file and read the surrounding code (not just the hunk)
+           and confirm it against the real code. De-dupe (same issue from many lenses = one).
+           DISCARD a claim (and note why) if: a linter/type-checker already covers it; the
+           failing path is unreachable; it is style/taste/naming; it is pre-existing code this
+           diff did not touch; it names no concrete failure trigger; or two lenses contradict
+           and neither proves it. A member listed as an error/skip produced no claims — do not
+           go looking for its findings.
+        3. Repo conventions: CLAUDE.md is already loaded into your context, so do not re-read
+           it. Read AGENTS.md and the `.claude/rules/` files that match the paths this diff
+           touches — those only. Do not enumerate the whole rules directory.
+        4. Add your own lens: conventions + test coverage. Assume the author is competent;
+           flag only diff-introduced defects with a concrete failure trigger.
+        5. If "Can push fixes" is true and you find clear, confirmed bugs/security/convention
+           issues, fix them (Edit/Write), then:
+           `git add -A && git commit -m "fix: <what>" && git push origin __BRANCH__`
+           Do NOT push style-only or speculative changes.
+        6. Assign severity yourself (council members do not rate it): Critical (security, crash,
+           data loss), Major (real bug / convention violation), Minor (rest). Post Major+ inline,
+           roll Minor into the summary, cap ~8 inline comments. Submit ONE review with
+           `gh pr review` (--approve / --request-changes / --comment). Use --request-changes only
+           for Critical. Never --approve in a run where you pushed fixes (use --comment).
+        7. In the review body include a collapsible council table:
+           `<details><summary>🧑‍⚖️ Council</summary>` then a Markdown table of
+           `| Model | Lens | Result |` (confirmed / rejected / no findings), then `</details>`.
+           If council was skipped, write "Council: skipped".
+        VCR_PROMPT_EOF
+        # The heredoc is quoted so the prompt stays literal (it contains
+        # backticks and $ that must not be expanded). Fill the run's values in
+        # with bash parameter expansion, reading them from the environment —
+        # never by interpolating a GitHub context straight into a sed pattern,
+        # which a branch name can break or inject through.
+        if [ -z "$VCR_PR" ] || [ -z "$VCR_BRANCH" ]; then
+          echo "::error::chair prompt inputs missing (pr='$VCR_PR' branch='$VCR_BRANCH')"
+          exit 1
+        fi
+        PROMPT="$(cat "$RUNNER_TEMP/chair-prompt.txt")"
+        PROMPT="${PROMPT//__PR__/$VCR_PR}"
+        PROMPT="${PROMPT//__REPO__/$VCR_REPO}"
+        PROMPT="${PROMPT//__BRANCH__/$VCR_BRANCH}"
+        PROMPT="${PROMPT//__CANPUSH__/$VCR_CANPUSH}"
+        PROMPT="${PROMPT//__CYCLES__/$VCR_CYCLES}"
+        # An empty prompt is the one failure this step can produce, and it fails
+        # SILENTLY downstream: claude-code-action skips and reports success, so
+        # the PR gets a green review check with no review behind it. Fail here
+        # instead, where the cause is obvious.
+        if [ ${#PROMPT} -lt 200 ] || case "$PROMPT" in *__PR__*|*__BRANCH__*) true;; *) false;; esac; then
+          echo "::error::chair prompt did not build (length ${#PROMPT}, placeholders may remain)"
+          exit 1
+        fi
+        # Publish as a STEP OUTPUT, not an env var. The `env` context is not
+        # available in a composite step's `with:` block, so passing the prompt
+        # through $GITHUB_ENV silently delivers an EMPTY prompt — and
+        # claude-code-action treats no prompt as "nothing to do", skips, and
+        # reports SUCCESS. That is a green check for a review that never ran.
+        # The `steps` context does reach `with:`.
+        {
+          echo "text<<VCR_OUT_EOF"
+          printf '%s\n' "$PROMPT"
+          echo "VCR_OUT_EOF"
+        } >> "$GITHUB_OUTPUT"
+
+    - name: Council fan-out (await)
+      shell: bash
+      continue-on-error: true
+      run: |
+        PID="$(cat council.pid 2>/dev/null || true)"
+        if [ -n "$PID" ]; then
+          # Hard ceiling so a wedged member can never hold the job open; the
+          # engine's own per-member timeout should always fire first.
+          WAITED=0
+          while kill -0 "$PID" 2>/dev/null && [ "$WAITED" -lt 300 ]; do
+            sleep 2
+            WAITED=$((WAITED + 2))
+          done
+          kill -0 "$PID" 2>/dev/null && kill "$PID" 2>/dev/null && echo "council exceeded 300s; killed"
+        fi
+        cat council.log || true
+        echo "----- council-findings.md -----"; cat council-findings.md || true
+
+    # Failover chain: each attempt runs the SAME prompt (built once above) with
+    # a different subscription. Every attempt costs ~10s of setup even when the
+    # token is dead, so order them best-credit-first.
     - name: Chair review (primary token)
       id: chair_primary
       continue-on-error: true
@@ -111,45 +247,9 @@ runs:
         claude_code_oauth_token: ${{ inputs.claude_code_oauth_token }}
         use_commit_signing: true
         allowed_bots: "*"
-        prompt: |
-          You chair an LLM council reviewing PR #${{ github.event.pull_request.number }} in ${{ github.repository }}.
-          Branch: ${{ github.event.pull_request.head.ref }}. Can push fixes: ${{ steps.cycle.outputs.can_push }} (automated fix cycles so far: ${{ steps.cycle.outputs.cycles }}).
-
-          LOOP GUARD: if "Can push fixes" is false, DO NOT push any commits — leave a review comment only. If a prior cycle already tried to fix an issue and it persists, stop fixing it and flag it for a human instead of pushing again.
-
-          Council members each reviewed this PR through one lens (correctness, performance,
-          security, maintainability) and wrote findings to `council-findings.md`. You are the
-          synthesizer and the ONLY member who can push fixes.
-
-          1. `gh pr diff ${{ github.event.pull_request.number }}` — read the diff.
-          2. Read `council-findings.md`. Each item is an UNVERIFIED claim, not ground truth.
-             For every claim, open the file and read the surrounding code (not just the hunk)
-             and confirm it against the real code. De-dupe (same issue from many lenses = one).
-             DISCARD a claim (and note why) if: a linter/type-checker already covers it; the
-             failing path is unreachable; it is style/taste/naming; it is pre-existing code this
-             diff did not touch; it names no concrete failure trigger; or two lenses contradict
-             and neither proves it.
-          3. Read CLAUDE.md / AGENTS.md and any `.claude/rules/` relevant to changed files.
-          4. Add your own lens: conventions + test coverage. Assume the author is competent;
-             flag only diff-introduced defects with a concrete failure trigger.
-          5. If "Can push fixes" is true and you find clear, confirmed bugs/security/convention
-             issues, fix them (Edit/Write), then:
-             `git add -A && git commit -m "fix: <what>" && git push origin ${{ github.event.pull_request.head.ref }}`
-             Do NOT push style-only or speculative changes.
-          6. Assign severity yourself (council members do not rate it): Critical (security, crash,
-             data loss), Major (real bug / convention violation), Minor (rest). Post Major+ inline,
-             roll Minor into the summary, cap ~8 inline comments. Submit ONE review with
-             `gh pr review` (--approve / --request-changes / --comment). Use --request-changes only
-             for Critical. Never --approve in a run where you pushed fixes (use --comment).
-          7. In the review body include a collapsible council table:
-             `<details><summary>🧑‍⚖️ Council</summary>` then a Markdown table of
-             `| Model | Lens | Result |` (confirmed / rejected / no findings), then `</details>`.
-             If council was skipped, write "Council: skipped".
+        prompt: ${{ steps.prompt.outputs.text }}
         claude_args: '--allowed-tools "Bash(gh api:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr review:*),Bash(gh pr comment:*),Bash(git:*),Bash(jq:*),Bash(cat:*),Read,Glob,Grep,Edit,Write"'
 
-    # Failover: only runs if the primary chair failed (e.g. the primary token is
-    # rate-limited / quota-exhausted) AND a backup token is configured. Same
-    # prompt, second subscription. Keep in sync with the primary step above.
     - name: Chair review (backup token)
       id: chair_backup
       if: steps.chair_primary.outcome == 'failure' && inputs.claude_code_oauth_token_2 != ''
@@ -159,50 +259,32 @@ runs:
         claude_code_oauth_token: ${{ inputs.claude_code_oauth_token_2 }}
         use_commit_signing: true
         allowed_bots: "*"
-        prompt: |
-          You chair an LLM council reviewing PR #${{ github.event.pull_request.number }} in ${{ github.repository }}.
-          Branch: ${{ github.event.pull_request.head.ref }}. Can push fixes: ${{ steps.cycle.outputs.can_push }} (automated fix cycles so far: ${{ steps.cycle.outputs.cycles }}).
-
-          LOOP GUARD: if "Can push fixes" is false, DO NOT push any commits — leave a review comment only. If a prior cycle already tried to fix an issue and it persists, stop fixing it and flag it for a human instead of pushing again.
-
-          Council members each reviewed this PR through one lens (correctness, performance,
-          security, maintainability) and wrote findings to `council-findings.md`. You are the
-          synthesizer and the ONLY member who can push fixes.
-
-          1. `gh pr diff ${{ github.event.pull_request.number }}` — read the diff.
-          2. Read `council-findings.md`. Each item is an UNVERIFIED claim, not ground truth.
-             For every claim, open the file and read the surrounding code (not just the hunk)
-             and confirm it against the real code. De-dupe (same issue from many lenses = one).
-             DISCARD a claim (and note why) if: a linter/type-checker already covers it; the
-             failing path is unreachable; it is style/taste/naming; it is pre-existing code this
-             diff did not touch; it names no concrete failure trigger; or two lenses contradict
-             and neither proves it.
-          3. Read CLAUDE.md / AGENTS.md and any `.claude/rules/` relevant to changed files.
-          4. Add your own lens: conventions + test coverage. Assume the author is competent;
-             flag only diff-introduced defects with a concrete failure trigger.
-          5. If "Can push fixes" is true and you find clear, confirmed bugs/security/convention
-             issues, fix them (Edit/Write), then:
-             `git add -A && git commit -m "fix: <what>" && git push origin ${{ github.event.pull_request.head.ref }}`
-             Do NOT push style-only or speculative changes.
-          6. Assign severity yourself (council members do not rate it): Critical (security, crash,
-             data loss), Major (real bug / convention violation), Minor (rest). Post Major+ inline,
-             roll Minor into the summary, cap ~8 inline comments. Submit ONE review with
-             `gh pr review` (--approve / --request-changes / --comment). Use --request-changes only
-             for Critical. Never --approve in a run where you pushed fixes (use --comment).
-          7. In the review body include a collapsible council table:
-             `<details><summary>🧑‍⚖️ Council</summary>` then a Markdown table of
-             `| Model | Lens | Result |` (confirmed / rejected / no findings), then `</details>`.
-             If council was skipped, write "Council: skipped".
+        prompt: ${{ steps.prompt.outputs.text }}
         claude_args: '--allowed-tools "Bash(gh api:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr review:*),Bash(gh pr comment:*),Bash(git:*),Bash(jq:*),Bash(cat:*),Read,Glob,Grep,Edit,Write"'
 
-    # Surface the true result: green if either chair run succeeded; red if the
-    # primary failed and no backup rescued it. Without this, continue-on-error
-    # on the primary would mask a genuine failure as success.
+    - name: Chair review (third token)
+      id: chair_third
+      if: steps.chair_primary.outcome == 'failure' && steps.chair_backup.outcome == 'failure' && inputs.claude_code_oauth_token_3 != ''
+      continue-on-error: true
+      uses: anthropics/claude-code-action@v1
+      with:
+        claude_code_oauth_token: ${{ inputs.claude_code_oauth_token_3 }}
+        use_commit_signing: true
+        allowed_bots: "*"
+        prompt: ${{ steps.prompt.outputs.text }}
+        claude_args: '--allowed-tools "Bash(gh api:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr review:*),Bash(gh pr comment:*),Bash(git:*),Bash(jq:*),Bash(cat:*),Read,Glob,Grep,Edit,Write"'
+
+    # Surface the true result: green if any chair run succeeded; red if they all
+    # failed. Without this, continue-on-error would mask a genuine failure as
+    # success. A chair that dies in ~0.5s at $0 cost with one turn is a dead
+    # token, not a bad review — check the subscription before the prompt.
     - name: Chair result gate
       shell: bash
       run: |
         P="${{ steps.chair_primary.outcome }}"
         B="${{ steps.chair_backup.outcome }}"
+        T="${{ steps.chair_third.outcome }}"
         if [ "$P" = "success" ]; then echo "chair: primary token succeeded"; exit 0; fi
         if [ "$B" = "success" ]; then echo "chair: primary failed ($P); backup token succeeded"; exit 0; fi
-        echo "chair review failed (primary=$P, backup=${B:-skipped})"; exit 1
+        if [ "$T" = "success" ]; then echo "chair: primary and backup failed; third token succeeded"; exit 0; fi
+        echo "chair review failed (primary=$P, backup=${B:-skipped}, third=${T:-skipped})"; exit 1

@@ -26,7 +26,13 @@
 import fs from "node:fs";
 
 const MAX_DIFF_CHARS = 180_000; // bound tokens/cost on large PRs
-const REQUEST_TIMEOUT_MS = 150_000;
+// Members run in parallel, so the council costs max(member latency), not the
+// sum — the timeout is therefore a direct tail-latency tax on every run. In
+// 16 sampled CI runs every member that reached the old 150s ceiling returned
+// NOTHING, so the wait bought no review coverage. 90s still clears a slow
+// reasoning model on a large diff. Raise COUNCIL_TIMEOUT_MS if a member you
+// value is being cut off — the per-member timings logged below tell you.
+const REQUEST_TIMEOUT_MS = Number(process.env.COUNCIL_TIMEOUT_MS) || 90_000;
 
 // All providers expose an OpenAI-compatible /chat/completions endpoint
 // (Gemini via its OpenAI-compat URL), so one request shape serves all.
@@ -54,6 +60,34 @@ const LENSES = {
   maintainability:
     "maintainability and data integrity: dead/duplicated code, migration and data-loss risks, wrong or missing error handling, missing input validation, and broken API contracts",
 };
+
+// A native provider key that is present but out of credit answers in well under
+// a second with 401/402/429 — the member simply vanishes from the council and
+// the chair reviews alone. Measured on 2026-08-27: on 47 of the 48 repos running
+// this action, three of the four default members were 429-ing (OpenAI
+// `insufficient_quota`, Gemini monthly spend cap, Moonshot suspended balance),
+// so the "council" was one model. OpenRouter fronts all of these vendors, so a
+// single funded key can carry every lens. Map each native model to its
+// OpenRouter id and retry there when the native call fails on auth or quota.
+const OPENROUTER_EQUIVALENT = {
+  "gpt-5.6": "openai/gpt-5.6",
+  "gpt-5.6-terra-pro": "openai/gpt-5.6-terra-pro",
+  "gemini-3.1-pro-preview": "google/gemini-3.1-pro-preview",
+  "kimi-k3": "moonshotai/kimi-k3",
+};
+
+// Statuses that mean "this key will not work today", as opposed to a transient
+// server fault. Retrying the SAME key on these is pointless; a different route
+// is the only thing that can help.
+const CREDENTIAL_FAILURE_STATUSES = [401, 402, 403, 429];
+
+function openRouterFallbackFor(model) {
+  if (model.provider === "openrouter") return null;
+  if (!process.env.OPENROUTER_API_KEY?.trim()) return null;
+  const mapped = OPENROUTER_EQUIVALENT[model.model] || (model.model.includes("/") ? model.model : null);
+  if (!mapped) return null;
+  return { ...model, provider: "openrouter", model: mapped };
+}
 
 const DEFAULT_MODELS = [
   { provider: "openai", model: process.env.OPENAI_MODEL || "gpt-5.6", name: "GPT-5.6 (Codex)", lens: "correctness" },
@@ -94,10 +128,12 @@ function systemPrompt(lens) {
 }
 
 async function callModel(model, diff) {
+  const startedAt = Date.now();
+  const timed = (r) => ({ ...r, ms: Date.now() - startedAt });
   const provider = PROVIDERS[model.provider];
-  if (provider && !provider.url) return { model, error: "skipped: CUSTOM_BASE_URL not set" };
+  if (provider && !provider.url) return timed({ model, error: "skipped: CUSTOM_BASE_URL not set" });
   const apiKey = provider && process.env[provider.keyEnv]?.trim();
-  if (!apiKey) return { model, error: `skipped: ${provider?.keyEnv || model.provider} not set` };
+  if (!apiKey) return timed({ model, error: `skipped: ${provider?.keyEnv || model.provider} not set` });
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
@@ -120,17 +156,33 @@ async function callModel(model, diff) {
     });
     if (!res.ok) {
       const body = await res.text().catch(() => "");
-      return { model, error: `HTTP ${res.status}: ${body.slice(0, 300)}` };
+      return timed({ model, error: `HTTP ${res.status}: ${body.slice(0, 300)}`, status: res.status });
     }
     const json = await res.json();
     const text = json?.choices?.[0]?.message?.content?.trim();
-    if (!text) return { model, error: "empty response" };
-    return { model, text };
+    if (!text) return timed({ model, error: "empty response" });
+    return timed({ model, text });
   } catch (err) {
-    return { model, error: err?.name === "AbortError" ? "timed out" : String(err?.message || err) };
+    return timed({ model, error: err?.name === "AbortError" ? "timed out" : String(err?.message || err) });
   } finally {
     clearTimeout(timer);
   }
+}
+
+// One retry, on a different route, only for a credential/quota failure. A
+// member already on OpenRouter has nowhere to fall back to, and a genuine model
+// error must NOT be retried — that would double the cost of every real failure.
+async function callModelWithFallback(model, diff) {
+  const first = await callModel(model, diff);
+  if (!first.error || !CREDENTIAL_FAILURE_STATUSES.includes(first.status)) return first;
+  const fallback = openRouterFallbackFor(model);
+  if (!fallback) return first;
+  console.log(`- ${model.name}: ${model.provider} returned ${first.status}; retrying via openrouter`);
+  const second = await callModel(fallback, diff);
+  if (second.error) {
+    return { ...second, error: `${model.provider} HTTP ${first.status}, openrouter: ${second.error}` };
+  }
+  return { ...second, model: { ...fallback, name: `${model.name} (via OpenRouter)` } };
 }
 
 function buildFindingsMarkdown(results, { truncated } = {}) {
@@ -222,8 +274,15 @@ async function main() {
   if (truncated) diff = diff.slice(0, MAX_DIFF_CHARS);
 
   console.log(`Council: ${models.map((m) => `${m.name} [${m.provider}]`).join(", ")}`);
-  const results = await Promise.all(models.map((m) => callModel(m, diff)));
-  for (const r of results) console.log(`- ${r.model.name}: ${r.error ? "SKIP/ERR " + r.error : "ok"}`);
+  const councilStartedAt = Date.now();
+  const results = await Promise.all(models.map((m) => callModelWithFallback(m, diff)));
+  for (const r of results) {
+    const took = r.ms === undefined ? "" : ` (${(r.ms / 1000).toFixed(1)}s)`;
+    console.log(`- ${r.model.name}${took}: ${r.error ? "SKIP/ERR " + r.error : "ok"}`);
+  }
+  console.log(
+    `Council wall time: ${((Date.now() - councilStartedAt) / 1000).toFixed(1)}s (timeout ${REQUEST_TIMEOUT_MS / 1000}s)`,
+  );
 
   write(buildFindingsMarkdown(results, { truncated }));
   console.log(`Wrote ${outFile}`);
