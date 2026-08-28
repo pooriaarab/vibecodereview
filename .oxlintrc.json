@@ -5,7 +5,7 @@
   "rules": {
     "complexity": ["warn", { "max": 10 }],
     "max-lines": ["warn", { "max": 300, "skipBlankLines": true, "skipComments": true }],
-    "max-lines-per-function": ["warn", { "max": 50, "skipBlankLines": true, "skipComments": true }],
+    "max-lines-per-function": ["error", { "max": 50, "skipBlankLines": true, "skipComments": true }],
     "max-params": ["warn", { "max": 4 }],
     "max-depth": ["warn", { "max": 4 }],
     "max-nested-callbacks": ["warn", { "max": 4 }],
