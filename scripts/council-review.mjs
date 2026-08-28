@@ -172,7 +172,28 @@ async function callModel(model, diff) {
 // One retry, on a different route, only for a credential/quota failure. A
 // member already on OpenRouter has nowhere to fall back to, and a genuine model
 // error must NOT be retried — that would double the cost of every real failure.
+function hasNativeKey(model) {
+  const keyEnv = PROVIDERS[model.provider]?.keyEnv;
+  return Boolean(keyEnv && process.env[keyEnv]?.trim());
+}
+
 async function callModelWithFallback(model, diff) {
+  // An ABSENT native key leaves the member in exactly the position a REJECTED
+  // one does: it cannot serve its lens. Only the rejected case used to reroute,
+  // so a repo that simply never set MOONSHOT_API_KEY silently lost the security
+  // lens while a repo with a suspended Moonshot account kept it. Route both the
+  // same way — and skip the pointless round trip, since a call with no key
+  // cannot succeed.
+  if (!hasNativeKey(model)) {
+    const route = openRouterFallbackFor(model);
+    if (!route) return callModel(model, diff); // no OpenRouter route: keep the skip note
+    console.log(`- ${model.name}: no ${PROVIDERS[model.provider]?.keyEnv}; routing via openrouter`);
+    const only = await callModel(route, diff);
+    if (only.error) {
+      return { ...only, error: `${PROVIDERS[model.provider]?.keyEnv} not set, openrouter: ${only.error}` };
+    }
+    return { ...only, model: { ...route, name: `${model.name} (via OpenRouter)` } };
+  }
   const first = await callModel(model, diff);
   if (!first.error || !CREDENTIAL_FAILURE_STATUSES.includes(first.status)) return first;
   const fallback = openRouterFallbackFor(model);
@@ -256,8 +277,12 @@ async function main() {
     console.log("No valid council members — skipped.");
     return;
   }
-  const withKey = models.filter((m) => process.env[PROVIDERS[m.provider]?.keyEnv]?.trim());
-  if (withKey.length === 0) {
+  // A member is servable if its own key is set OR it can be routed through
+  // OpenRouter. Counting only native keys skipped the whole council on a repo
+  // that had nothing but OPENROUTER_API_KEY, even though every lens was
+  // reachable through it.
+  const servable = models.filter((m) => hasNativeKey(m) || openRouterFallbackFor(m));
+  if (servable.length === 0) {
     const missing = models.map((m) => PROVIDERS[m.provider]?.keyEnv).join(", ");
     write(`# 🧑‍⚖️ LLM Council findings\n\n_Council skipped: no provider keys set (${missing})._\n`);
     console.log("No provider keys — council skipped.");
