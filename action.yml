@@ -222,6 +222,81 @@ runs:
           echo "VCR_OUT_EOF"
         } >> "$GITHUB_OUTPUT"
 
+
+    # Probe the chair tokens before paying for an attempt.
+    #
+    # A chair attempt costs ~12s of claude-code-action setup (Bun, dependencies,
+    # app-token mint and revoke) before the model is reached, and a dead token
+    # then fails in ~0.3s. Measured on 7 successful runs across 5 repos
+    # (2026-08-28): primary 12.6s median, backup 9.4s median, both dead, on a
+    # 52s median job. That is 22s -- 42% of the job -- spent on two attempts
+    # that could not succeed.
+    #
+    # The probe runs the SAME CLI the action runs, with the same token, so it is
+    # faithful by construction: a dead token returns the documented signature
+    # (is_error true, num_turns 1, total_cost_usd 0, empty modelUsage). The three
+    # probes run concurrently, so the cost is one probe (~1-4s), not three.
+    #
+    # It FAILS OPEN. Only that exact signature prunes an attempt. A timeout, a
+    # crash, a parse failure or any unexpected output leaves the attempt in
+    # place, because wrongly skipping a healthy chair would silently downgrade
+    # every review on the fleet -- a far worse outcome than a wasted 12s. A
+    # chair that genuinely ran and failed does not match either: it carries
+    # num_turns > 1 and a nonzero cost, so a real bad run is never pruned.
+    #
+    # Placement is deliberate. This sits between the council's start and its
+    # await, so the probe overlaps the council's background window (5.5s
+    # measured) instead of adding to the critical path.
+    - name: Probe chair tokens
+      id: chair_probe
+      shell: bash
+      env:
+        VCR_T1: ${{ inputs.claude_code_oauth_token }}
+        VCR_T2: ${{ inputs.claude_code_oauth_token_2 }}
+        VCR_T3: ${{ inputs.claude_code_oauth_token_3 }}
+      run: |
+        probe() {
+          slot="$1"; token="$2"
+          # An absent token is already handled by the `if:` on each attempt.
+          # Report it live so this step never becomes a second, divergent gate.
+          if [ -z "$token" ]; then echo "live" > "probe.$slot"; return; fi
+          # A dead token makes the CLI exit non-zero AND print the dead
+          # signature, so the exit code cannot gate the parse. Ignore it and
+          # judge the JSON alone; anything unparseable falls through to live.
+          out="$(CLAUDE_CODE_OAUTH_TOKEN="$token" ANTHROPIC_API_KEY= \
+                 timeout 60 claude -p ok \
+                   --max-turns 1 \
+                   --allowed-tools "" \
+                   --output-format json 2>/dev/null || true)"
+          if printf '%s' "$out" | jq -e \
+               '.is_error == true and .num_turns == 1 and .total_cost_usd == 0
+                and (.modelUsage | type == "object" and length == 0)' \
+             >/dev/null 2>&1; then
+            echo "dead" > "probe.$slot"
+            # Say WHY. 401 means the token is revoked or stale and needs
+            # re-minting with `claude setup-token`; 429 means the subscription
+            # is capped and only time fixes it. Both look identical in the
+            # result JSON otherwise, and the difference decides what to do.
+            printf '%s' "$out" \
+              | jq -r '"  reason: HTTP \(.api_error_status // "?") \(.result // "no detail")"' \
+                    2>/dev/null > "reason.$slot" || true
+          else
+            echo "live" > "probe.$slot"
+          fi
+        }
+        probe 1 "$VCR_T1" &
+        probe 2 "$VCR_T2" &
+        probe 3 "$VCR_T3" &
+        wait
+        for s in 1 2 3; do
+          v="$(cat "probe.$s" 2>/dev/null || echo live)"
+          [ "$v" = "dead" ] || v="live"
+          echo "token_${s}=$v" >> "$GITHUB_OUTPUT"
+          echo "chair token $s: $v"
+          [ "$v" = "dead" ] && cat "reason.$s" 2>/dev/null
+          true
+        done
+
     - name: Council fan-out (await)
       shell: bash
       continue-on-error: true
@@ -239,12 +314,12 @@ runs:
         fi
         cat council.log || true
         echo "----- council-findings.md -----"; cat council-findings.md || true
-
     # Failover chain: each attempt runs the SAME prompt (built once above) with
     # a different subscription. Every attempt costs ~10s of setup even when the
     # token is dead, so order them best-credit-first.
     - name: Chair review (primary token)
       id: chair_primary
+      if: steps.chair_probe.outputs.token_1 != 'dead'
       continue-on-error: true
       uses: anthropics/claude-code-action@v1
       with:
@@ -256,7 +331,7 @@ runs:
 
     - name: Chair review (backup token)
       id: chair_backup
-      if: steps.chair_primary.outcome == 'failure' && inputs.claude_code_oauth_token_2 != ''
+      if: steps.chair_primary.outcome != 'success' && steps.chair_probe.outputs.token_2 != 'dead' && inputs.claude_code_oauth_token_2 != ''
       continue-on-error: true
       uses: anthropics/claude-code-action@v1
       with:
@@ -268,7 +343,7 @@ runs:
 
     - name: Chair review (third token)
       id: chair_third
-      if: steps.chair_primary.outcome == 'failure' && steps.chair_backup.outcome == 'failure' && inputs.claude_code_oauth_token_3 != ''
+      if: steps.chair_primary.outcome != 'success' && steps.chair_backup.outcome != 'success' && steps.chair_probe.outputs.token_3 != 'dead' && inputs.claude_code_oauth_token_3 != ''
       continue-on-error: true
       uses: anthropics/claude-code-action@v1
       with:
@@ -289,7 +364,7 @@ runs:
     - name: Chair fallback (OpenRouter)
       id: chair_fallback
       if: >-
-        steps.chair_primary.outcome == 'failure' &&
+        steps.chair_primary.outcome != 'success' &&
         steps.chair_backup.outcome != 'success' &&
         steps.chair_third.outcome != 'success' &&
         inputs.openrouter_api_key != ''
@@ -311,7 +386,9 @@ runs:
         T="${{ steps.chair_third.outcome }}"
         F="${{ steps.chair_fallback.outcome }}"
         if [ "$P" = "success" ]; then echo "chair: primary token succeeded"; exit 0; fi
-        if [ "$B" = "success" ]; then echo "chair: primary failed ($P); backup token succeeded"; exit 0; fi
+        if [ "$B" = "success" ]; then echo "chair: primary did not review ($P); backup token succeeded"; exit 0; fi
         if [ "$T" = "success" ]; then echo "chair: primary and backup failed; third token succeeded"; exit 0; fi
         if [ "$F" = "success" ]; then echo "chair: all Claude tokens failed; OpenRouter fallback posted the review"; exit 0; fi
-        echo "chair review failed (primary=$P, backup=${B:-skipped}, third=${T:-skipped}, fallback=${F:-skipped})"; exit 1
+        echo "chair review failed (primary=$P, backup=${B:-skipped}, third=${T:-skipped}, fallback=${F:-skipped})"
+        echo "probe: token_1=${{ steps.chair_probe.outputs.token_1 }} token_2=${{ steps.chair_probe.outputs.token_2 }} token_3=${{ steps.chair_probe.outputs.token_3 }}"
+        exit 1
