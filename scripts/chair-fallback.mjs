@@ -108,7 +108,8 @@ function normalizeFindings(parsed) {
   if (bad.length) throw new Error(`chair reply had ${bad.length} finding(s) that were not objects`);
   // Severity is matched with === below, so "major" would slip past the gate
   // and let a substantive finding fall through to the model's own verdict.
-  return raw.map((f) => ({ ...f, severity: SEVERITIES[String(f.severity).toLowerCase()] ?? "Minor" }));
+  for (const f of raw) f.severity = SEVERITIES[String(f.severity).toLowerCase()] ?? "Minor";
+  return raw;
 }
 
 // The model's `verdict` field is advisory; the findings are the evidence. It
