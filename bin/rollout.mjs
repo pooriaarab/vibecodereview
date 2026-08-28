@@ -105,7 +105,7 @@ function tryGh(args) {
   }
 }
 
-function processRepo(repo, log, dryRun) {
+function setSecrets(repo, log, dryRun) {
   // 1. Secrets. Empty env values are skipped with a log line.
   for (const name of SECRET_NAMES) {
     const value = process.env[name];
@@ -130,18 +130,23 @@ function processRepo(repo, log, dryRun) {
   if (!process.env.CLAUDE_CODE_OAUTH_TOKEN) {
     log('WARNING: CLAUDE_CODE_OAUTH_TOKEN is empty; the chair reviewer will fail without it');
   }
+}
 
+function workflowExists(repo, log, dryRun) {
   // 2. Workflow already on the default branch?
   if (dryRun) {
     log(`[dry-run] would run: gh api repos/${repo}/contents/${WORKFLOW_PATH}`);
-  } else {
-    const check = tryGh(['api', `repos/${repo}/contents/${WORKFLOW_PATH}`]);
-    if (check.ok) {
-      log('workflow exists, skipping PR');
-      return 'skipped (workflow exists)';
-    }
+    return false;
   }
+  const check = tryGh(['api', `repos/${repo}/contents/${WORKFLOW_PATH}`]);
+  if (check.ok) {
+    log('workflow exists, skipping PR');
+    return true;
+  }
+  return false;
+}
 
+function resolveHead(repo, log, dryRun) {
   // 3a. Default branch.
   let defaultBranch;
   if (dryRun) {
@@ -160,7 +165,10 @@ function processRepo(repo, log, dryRun) {
   } else {
     sha = gh(['api', `repos/${repo}/git/ref/heads/${defaultBranch}`, '--jq', '.object.sha']).trim();
   }
+  return { defaultBranch, sha };
+}
 
+function ensureBranch(repo, log, dryRun, sha) {
   // 3c. Create the scratch branch (reuse it if it already exists).
   if (dryRun) {
     log(`[dry-run] would run: gh api --method POST repos/${repo}/git/refs -f ref=refs/heads/${BRANCH} -f sha=<sha>`);
@@ -178,7 +186,9 @@ function processRepo(repo, log, dryRun) {
       throw new Error(`failed to create branch ${BRANCH}: ${res.stderr}`);
     }
   }
+}
 
+function writeWorkflowFile(repo, log, dryRun) {
   // 3d. Write the workflow file on the scratch branch.
   const contentB64 = Buffer.from(WORKFLOW_YAML).toString('base64');
   if (dryRun) {
@@ -197,7 +207,9 @@ function processRepo(repo, log, dryRun) {
     gh(putArgs);
     log(`workflow file written to branch ${BRANCH}`);
   }
+}
 
+function openPr(repo, log, dryRun, defaultBranch) {
   // 3e. Open the PR.
   if (dryRun) {
     log(`[dry-run] would run: gh pr create --repo ${repo} --base <default> --head ${BRANCH} --title "${PR_TITLE}" --body "${PR_BODY}"`);
@@ -219,8 +231,18 @@ function processRepo(repo, log, dryRun) {
   throw new Error(`gh pr create failed: ${pr.stderr}`);
 }
 
-function main() {
-  const argv = process.argv.slice(2);
+function processRepo(repo, log, dryRun) {
+  setSecrets(repo, log, dryRun);
+  if (workflowExists(repo, log, dryRun)) {
+    return 'skipped (workflow exists)';
+  }
+  const { defaultBranch, sha } = resolveHead(repo, log, dryRun);
+  ensureBranch(repo, log, dryRun, sha);
+  writeWorkflowFile(repo, log, dryRun);
+  return openPr(repo, log, dryRun, defaultBranch);
+}
+
+function collectRepos(argv) {
   const dryRun = argv.includes('--dry-run');
   const argvRepos = argv.filter((a) => a !== '--dry-run');
 
@@ -257,8 +279,10 @@ function main() {
     }
   }
 
-  if (dryRun) console.log('[dry-run] no changes will be made\n');
+  return repos;
+}
 
+function runAll(repos, dryRun) {
   const summary = [];
   for (const repo of repos) {
     const log = (msg) => console.log(`[${repo}] ${msg}`);
@@ -272,11 +296,23 @@ function main() {
     summary.push({ repo, status });
     console.log('');
   }
+  return summary;
+}
 
+function printSummary(summary) {
   console.log('Summary:');
   for (const { repo, status } of summary) {
     console.log(`  ${repo}: ${status}`);
   }
+}
+
+function main() {
+  const argv = process.argv.slice(2);
+  const dryRun = argv.includes('--dry-run');
+  const repos = collectRepos(argv);
+  if (dryRun) console.log('[dry-run] no changes will be made\n');
+  const summary = runAll(repos, dryRun);
+  printSummary(summary);
 }
 
 main();
