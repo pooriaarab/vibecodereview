@@ -79,7 +79,7 @@ const OPENROUTER_EQUIVALENT = {
 // Statuses that mean "this key will not work today", as opposed to a transient
 // server fault. Retrying the SAME key on these is pointless; a different route
 // is the only thing that can help.
-const CREDENTIAL_FAILURE_STATUSES = [401, 402, 403, 429];
+const CREDENTIAL_FAILURE_STATUSES = new Set([401, 402, 403, 429]);
 
 function openRouterFallbackFor(model) {
   if (model.provider === "openrouter") return null;
@@ -174,7 +174,7 @@ async function callModel(model, diff) {
 // error must NOT be retried — that would double the cost of every real failure.
 async function callModelWithFallback(model, diff) {
   const first = await callModel(model, diff);
-  if (!first.error || !CREDENTIAL_FAILURE_STATUSES.includes(first.status)) return first;
+  if (!first.error || !CREDENTIAL_FAILURE_STATUSES.has(first.status)) return first;
   const fallback = openRouterFallbackFor(model);
   if (!fallback) return first;
   console.log(`- ${model.name}: ${model.provider} returned ${first.status}; retrying via openrouter`);
@@ -261,7 +261,7 @@ async function main() {
       if (openRouterFallbackFor({ provider: "openai", model: "some-unmapped-model" }) !== null) {
         throw new Error("selfcheck: an unmapped model must not be guessed at");
       }
-      if (CREDENTIAL_FAILURE_STATUSES.includes(500) || !CREDENTIAL_FAILURE_STATUSES.includes(429)) {
+      if (CREDENTIAL_FAILURE_STATUSES.has(500) || !CREDENTIAL_FAILURE_STATUSES.has(429)) {
         throw new Error("selfcheck: credential-failure statuses wrong");
       }
     } finally {
