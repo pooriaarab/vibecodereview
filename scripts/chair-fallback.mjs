@@ -95,8 +95,15 @@ function parseVerdict(text) {
 // One normalization, used by both the rendered body and the verdict. Two
 // call sites normalizing differently is how a parseable reply still throws.
 function normalizeFindings(parsed) {
-  if (!Array.isArray(parsed?.findings)) return [];
-  return parsed.findings.filter((f) => f && typeof f === "object");
+  const raw = parsed?.findings;
+  if (raw === undefined || raw === null) return [];
+  // Coercing a malformed shape to [] would silently discard a Critical or
+  // Major and let verdictFlag fall through to the model's claimed verdict —
+  // exactly the "never approve over a Major" guarantee this file exists to
+  // keep. json_object mode guarantees valid JSON, not the instructed schema,
+  // so treat a wrong shape as a hard failure rather than an empty review.
+  if (!Array.isArray(raw)) throw new Error("chair reply had a malformed `findings` field (expected an array)");
+  return raw.filter((f) => f && typeof f === "object");
 }
 
 // The model's `verdict` field is advisory; the findings are the evidence. It
