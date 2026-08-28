@@ -272,6 +272,13 @@ runs:
                '.is_error == true and .num_turns == 1 and .total_cost_usd == 0
                 and (.modelUsage | length) == 0' >/dev/null 2>&1; then
             echo "dead" > "probe.$slot"
+            # Say WHY. 401 means the token is revoked or stale and needs
+            # re-minting with `claude setup-token`; 429 means the subscription
+            # is capped and only time fixes it. Both look identical in the
+            # result JSON otherwise, and the difference decides what to do.
+            printf '%s' "$out" \
+              | jq -r '"  reason: HTTP \(.api_error_status // "?") \(.result // "no detail")"' \
+                    2>/dev/null > "reason.$slot" || true
           else
             echo "live" > "probe.$slot"
           fi
@@ -285,6 +292,8 @@ runs:
           [ "$v" = "dead" ] || v="live"
           echo "token_${s}=$v" >> "$GITHUB_OUTPUT"
           echo "chair token $s: $v"
+          [ "$v" = "dead" ] && cat "reason.$s" 2>/dev/null
+          true
         done
 
     - name: Council fan-out (await)
