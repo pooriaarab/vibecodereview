@@ -152,6 +152,13 @@ async function main() {
   const truncated = diff.length > MAX_DIFF_CHARS;
   const parsed = parseVerdict(await askChair(truncate(diff, MAX_DIFF_CHARS), council, truncated));
   const findings = normalizeFindings(parsed);
+  // A syntactically-valid but empty reply ({}) would otherwise post "_No
+  // summary._" with no findings and still report the step as a success —
+  // a hollow review that looks like a real one. Fail loudly instead, so the
+  // gate reports the fallback as failed and the red check means something.
+  if (!parsed.summary?.trim() && findings.length === 0) {
+    throw new Error("chair reply had neither a summary nor any findings");
+  }
   const body = renderBody(parsed, findings, { truncated });
   const flag = verdictFlag(findings, parsed.verdict);
 
