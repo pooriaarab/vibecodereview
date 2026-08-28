@@ -47,7 +47,7 @@ function truncate(s, n) {
   return s.length > n ? s.slice(0, n) : s;
 }
 
-async function askChair(diff, council) {
+async function askChair(diff, council, truncated) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   try {
@@ -64,7 +64,12 @@ async function askChair(diff, council) {
         response_format: { type: "json_object" },
         messages: [
           { role: "system", content: SYSTEM },
-          { role: "user", content: `PR diff:\n\n${diff}\n\n---\n\nCouncil findings:\n\n${council}` },
+          {
+            role: "user",
+            content:
+              (truncated ? "NOTE: this diff was truncated for length. Judge only what you can see.\n\n" : "") +
+              `PR diff:\n\n${diff}\n\n---\n\nCouncil findings:\n\n${council}`,
+          },
         ],
       }),
     });
@@ -87,8 +92,22 @@ function parseVerdict(text) {
   return JSON.parse(text.slice(start, end + 1));
 }
 
-function renderBody(parsed) {
-  const findings = Array.isArray(parsed.findings) ? parsed.findings : [];
+// One normalization, used by both the rendered body and the verdict. Two
+// call sites normalizing differently is how a parseable reply still throws.
+function normalizeFindings(parsed) {
+  if (!Array.isArray(parsed?.findings)) return [];
+  return parsed.findings.filter((f) => f && typeof f === "object");
+}
+
+// The model's `verdict` field is advisory; the findings are the evidence. It
+// must never approve over a Major, which its own instructions forbid.
+function verdictFlag(findings, claimed) {
+  if (findings.some((f) => f.severity === "Critical")) return "--request-changes";
+  if (findings.some((f) => f.severity === "Major")) return "--comment";
+  return claimed === "approve" ? "--approve" : "--comment";
+}
+
+function renderBody(parsed, findings, { truncated } = {}) {
   const order = { Critical: 0, Major: 1, Minor: 2 };
   const sorted = findings.toSorted((a, b) => (order[a.severity] ?? 3) - (order[b.severity] ?? 3));
   const icon = { Critical: "🔴", Major: "🟠", Minor: "🟡" };
@@ -103,6 +122,9 @@ function renderBody(parsed) {
     parsed.summary || "_No summary._",
     "",
   ];
+  if (truncated) {
+    lines.push("> ⚠️ The diff was truncated for length; this review covers the first portion only.", "");
+  }
   if (sorted.length) {
     lines.push("### Findings", "");
     for (const f of sorted) {
@@ -127,22 +149,17 @@ async function main() {
   const council =
     councilFile && fs.existsSync(councilFile) ? fs.readFileSync(councilFile, "utf8") : "_No council findings._";
 
-  const parsed = parseVerdict(await askChair(truncate(diff, MAX_DIFF_CHARS), council));
-  const body = renderBody(parsed);
-
-  // Never request changes without a Critical finding, and never approve while a
-  // Critical is on the table — the model's own verdict field is advisory, the
-  // findings are the evidence.
-  const hasCritical = (parsed.findings || []).some((f) => f.severity === "Critical");
-  let flag = "--comment";
-  if (hasCritical) flag = "--request-changes";
-  else if (parsed.verdict === "approve") flag = "--approve";
+  const truncated = diff.length > MAX_DIFF_CHARS;
+  const parsed = parseVerdict(await askChair(truncate(diff, MAX_DIFF_CHARS), council, truncated));
+  const findings = normalizeFindings(parsed);
+  const body = renderBody(parsed, findings, { truncated });
+  const flag = verdictFlag(findings, parsed.verdict);
 
   fs.writeFileSync("chair-fallback-review.md", body);
   execFileSync("gh", ["pr", "review", String(pr), "--repo", repo, flag, "--body-file", "chair-fallback-review.md"], {
     stdio: "inherit",
   });
-  console.log(`fallback chair posted ${flag} (${(parsed.findings || []).length} findings, model ${MODEL})`);
+  console.log(`fallback chair posted ${flag} (${findings.length} findings, model ${MODEL})`);
 }
 
 main().catch((err) => {
