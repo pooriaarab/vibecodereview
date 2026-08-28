@@ -184,13 +184,19 @@ async function main() {
     post(flag);
     console.log(`fallback chair posted ${flag} (${findings.length} findings, model ${MODEL})`);
   } catch (err) {
-    // A repo with "Allow GitHub Actions to create and approve pull requests"
-    // off cannot --approve. Losing the whole review over the CLEANEST outcome
-    // is the worst possible failure for a path that exists to rescue a broken
-    // chair, so degrade to a comment and still deliver the review.
     if (flag === "--comment") throw err;
+    // A repo with "Allow GitHub Actions to create and approve pull requests"
+    // off cannot --approve or --request-changes. Post the findings as a plain
+    // comment either way, so the review is never lost to a permission setting.
     console.log(`${flag} failed (${err?.message || err}); posting as a comment instead`);
     post("--comment");
+    // But a downgraded --request-changes must NOT read as a pass: the verdict
+    // said Critical, and a green check would silently drop the block.
+    if (flag === "--request-changes") {
+      throw new Error("posted the review as a comment, but could not request changes on a Critical finding", {
+        cause: err,
+      });
+    }
     console.log(`fallback chair posted --comment (${findings.length} findings, model ${MODEL})`);
   }
 }
