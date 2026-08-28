@@ -18,6 +18,7 @@ import { execFileSync } from "node:child_process";
 const MAX_DIFF_CHARS = 180_000;
 const TIMEOUT_MS = Number(process.env.CHAIR_FALLBACK_TIMEOUT_MS) || 180_000;
 const MODEL = process.env.CHAIR_FALLBACK_MODEL || "anthropic/claude-sonnet-5";
+const SEVERITIES = { critical: "Critical", major: "Major", minor: "Minor" };
 
 const SYSTEM = `You chair a multi-model code review council. You receive a pull request diff and
 the council's per-lens findings. Produce ONE review.
@@ -103,7 +104,11 @@ function normalizeFindings(parsed) {
   // keep. json_object mode guarantees valid JSON, not the instructed schema,
   // so treat a wrong shape as a hard failure rather than an empty review.
   if (!Array.isArray(raw)) throw new Error("chair reply had a malformed `findings` field (expected an array)");
-  return raw.filter((f) => f && typeof f === "object");
+  const bad = raw.filter((f) => !f || typeof f !== "object");
+  if (bad.length) throw new Error(`chair reply had ${bad.length} finding(s) that were not objects`);
+  // Severity is matched with === below, so "major" would slip past the gate
+  // and let a substantive finding fall through to the model's own verdict.
+  return raw.map((f) => ({ ...f, severity: SEVERITIES[String(f.severity).toLowerCase()] ?? "Minor" }));
 }
 
 // The model's `verdict` field is advisory; the findings are the evidence. It
@@ -170,10 +175,23 @@ async function main() {
   const flag = verdictFlag(findings, parsed.verdict);
 
   fs.writeFileSync("chair-fallback-review.md", body);
-  execFileSync("gh", ["pr", "review", String(pr), "--repo", repo, flag, "--body-file", "chair-fallback-review.md"], {
-    stdio: "inherit",
-  });
-  console.log(`fallback chair posted ${flag} (${findings.length} findings, model ${MODEL})`);
+  const post = (f) =>
+    execFileSync("gh", ["pr", "review", String(pr), "--repo", repo, f, "--body-file", "chair-fallback-review.md"], {
+      stdio: "inherit",
+    });
+  try {
+    post(flag);
+    console.log(`fallback chair posted ${flag} (${findings.length} findings, model ${MODEL})`);
+  } catch (err) {
+    // A repo with "Allow GitHub Actions to create and approve pull requests"
+    // off cannot --approve. Losing the whole review over the CLEANEST outcome
+    // is the worst possible failure for a path that exists to rescue a broken
+    // chair, so degrade to a comment and still deliver the review.
+    if (flag === "--comment") throw err;
+    console.log(`${flag} failed (${err?.message || err}); posting as a comment instead`);
+    post("--comment");
+    console.log(`fallback chair posted --comment (${findings.length} findings, model ${MODEL})`);
+  }
 }
 
 main().catch((err) => {
