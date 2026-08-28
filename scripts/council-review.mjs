@@ -79,7 +79,7 @@ const OPENROUTER_EQUIVALENT = {
 // Statuses that mean "this key will not work today", as opposed to a transient
 // server fault. Retrying the SAME key on these is pointless; a different route
 // is the only thing that can help.
-const CREDENTIAL_FAILURE_STATUSES = [401, 402, 403, 429];
+const CREDENTIAL_FAILURE_STATUSES = new Set([401, 402, 403, 429]);
 
 function openRouterFallbackFor(model) {
   if (model.provider === "openrouter") return null;
@@ -174,7 +174,7 @@ async function callModel(model, diff) {
 // error must NOT be retried — that would double the cost of every real failure.
 async function callModelWithFallback(model, diff) {
   const first = await callModel(model, diff);
-  if (!first.error || !CREDENTIAL_FAILURE_STATUSES.includes(first.status)) return first;
+  if (!first.error || !CREDENTIAL_FAILURE_STATUSES.has(first.status)) return first;
   const fallback = openRouterFallbackFor(model);
   if (!fallback) return first;
   console.log(`- ${model.name}: ${model.provider} returned ${first.status}; retrying via openrouter`);
@@ -240,6 +240,34 @@ async function main() {
       PROVIDERS.custom.url = savedUrl;
     }
     if (!r2.error?.includes("CUSTOM_BASE_URL")) throw new Error("selfcheck: custom no-url path wrong: " + r2.error);
+    // The OpenRouter failover must fire ONLY for a credential/quota status, and
+    // only when an OpenRouter key exists. Getting either half wrong is silent:
+    // too eager doubles the cost of every real model error, too shy leaves the
+    // council with one member and nobody notices.
+    const savedOr = process.env.OPENROUTER_API_KEY;
+    delete process.env.OPENROUTER_API_KEY;
+    if (openRouterFallbackFor({ provider: "openai", model: "gpt-5.6" }) !== null) {
+      throw new Error("selfcheck: fell back to openrouter with no OPENROUTER_API_KEY");
+    }
+    process.env.OPENROUTER_API_KEY = "test-key";
+    try {
+      const fb = openRouterFallbackFor({ provider: "openai", model: "gpt-5.6", lens: "correctness" });
+      if (fb?.provider !== "openrouter" || fb.model !== "openai/gpt-5.6") {
+        throw new Error("selfcheck: wrong openrouter mapping: " + JSON.stringify(fb));
+      }
+      if (openRouterFallbackFor({ provider: "openrouter", model: "x-ai/grok-4.6" }) !== null) {
+        throw new Error("selfcheck: an openrouter member must not fall back to itself");
+      }
+      if (openRouterFallbackFor({ provider: "openai", model: "some-unmapped-model" }) !== null) {
+        throw new Error("selfcheck: an unmapped model must not be guessed at");
+      }
+      if (CREDENTIAL_FAILURE_STATUSES.has(500) || !CREDENTIAL_FAILURE_STATUSES.has(429)) {
+        throw new Error("selfcheck: credential-failure statuses wrong");
+      }
+    } finally {
+      if (savedOr === undefined) delete process.env.OPENROUTER_API_KEY;
+      else process.env.OPENROUTER_API_KEY = savedOr;
+    }
     console.log("selfcheck ok");
     return;
   }
@@ -289,6 +317,14 @@ async function main() {
 }
 
 main().catch((err) => {
+  // A FAILED SELFCHECK MUST FAIL. The catch below exists so a flaky provider
+  // never blocks a PR, but it was also swallowing --selfcheck failures and
+  // exiting 0 — so the check AGENTS.md tells you to run before every engine
+  // change could not actually catch anything.
+  if (process.argv.includes("--selfcheck")) {
+    console.error("selfcheck FAILED:", err?.message || err);
+    process.exit(1);
+  }
   // Never fail the workflow on council errors.
   console.error("Council error (non-fatal):", err);
   try {
