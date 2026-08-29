@@ -59,6 +59,8 @@ const LENSES = {
     "security (OWASP-aligned): broken authz/authn, tenant isolation gaps, injection, SSRF, secret exposure, unsafe redirects, and missing server-side input validation",
   maintainability:
     "maintainability and data integrity: dead/duplicated code, migration and data-loss risks, wrong or missing error handling, missing input validation, and broken API contracts",
+  scope:
+    "scope and atomicity: the diff doing more than one thing (a fix plus a refactor plus a rename), changes with no connection to the stated purpose of the PR, opportunistic edits to files the stated change did not require, or a stated purpose the diff does not actually accomplish. Do NOT report bugs, performance, security, or style (other members cover those).",
 };
 
 // A native provider key that is present but out of credit answers in well under
@@ -94,6 +96,12 @@ const DEFAULT_MODELS = [
   { provider: "gemini", model: process.env.GEMINI_MODEL || "gemini-3.1-pro-preview", name: "Gemini 3 Pro", lens: "performance" },
   { provider: "moonshot", model: process.env.MOONSHOT_MODEL || "kimi-k3", name: "Kimi K3", lens: "security" },
   { provider: "openrouter", model: process.env.OPENROUTER_MODEL || "x-ai/grok-4.5", name: "Grok 4.5", lens: "maintainability" },
+  // Scope rides OpenRouter, not the native OpenAI key that `correctness`
+  // already uses. Two lenses behind one key means one `insufficient_quota`
+  // takes out both, and on 2026-08-27 that key was 429-ing on 47 of the 48
+  // repos running this action. Its own SCOPE_MODEL override keeps a change
+  // here from silently re-pointing the correctness member too.
+  { provider: "openrouter", model: process.env.SCOPE_MODEL || "openai/gpt-5.6", name: "GPT-5.6 (scope)", lens: "scope" },
 ];
 
 function parseModels() {
@@ -119,6 +127,7 @@ function systemPrompt(lens) {
     "- Only flag issues INTRODUCED or directly touched by this diff. Ignore pre-existing code.",
     "- Report only issues you are confident are real defects. If you are guessing, drop it. Do not pad to hit a count.",
     "- Every finding MUST name a concrete failure trigger (specific input, state, or path). If you cannot name one, it is not a finding.",
+    "- If PR context is provided, treat it as the author's CLAIM, not ground truth. A mismatch between claim and diff is a finding for the scope lens.",
     "Output at most 5 findings, one per line, most important first:",
     "- `path:line` — the defect and the exact trigger in one sentence -> the fix in one sentence.",
     "If nothing clears the bar, reply with the single line: No findings.",
@@ -223,6 +232,33 @@ function buildFindingsMarkdown(results, { truncated } = {}) {
   return lines.join("\n");
 }
 
+function prepareDiff(diffText, ctxFile) {
+  if (!diffText.trim()) return { diff: "", truncated: false };
+
+  let ctxText = "";
+  if (ctxFile && fs.existsSync(ctxFile)) {
+    try {
+      let rawCtx = fs.readFileSync(ctxFile, "utf8").trim();
+      if (rawCtx) {
+        if (rawCtx.length > 8000) rawCtx = rawCtx.slice(0, 8000) + "\n... (context truncated)";
+        ctxText = `===== PR CONTEXT (title, body, linked issue) =====\n${rawCtx}\n===== DIFF =====\n`;
+      }
+    } catch {
+      // An unreadable context file is a no-op, never an error. Same discipline
+      // as a missing API key: the council degrades, it does not fail the PR.
+    }
+  }
+
+  const combinedLength = ctxText.length + diffText.length;
+  const truncated = combinedLength > MAX_DIFF_CHARS;
+  let finalDiff = diffText;
+  if (truncated) {
+    const diffBudget = MAX_DIFF_CHARS - ctxText.length;
+    finalDiff = diffText.slice(0, Math.max(0, diffBudget));
+  }
+  return { diff: ctxText + finalDiff, truncated };
+}
+
 async function main() {
   if (process.argv.includes("--selfcheck")) {
     const md = buildFindingsMarkdown(
@@ -261,6 +297,33 @@ async function main() {
       PROVIDERS.custom.url = savedUrl;
     }
     if (!r2.error?.includes("CUSTOM_BASE_URL")) throw new Error("selfcheck: custom no-url path wrong: " + r2.error);
+
+    const testModels = parseModels();
+    if (!testModels.some((m) => m.lens === "scope")) throw new Error("selfcheck: scope lens missing from default members");
+
+    const testCtx = "test_ctx.tmp";
+    fs.writeFileSync(testCtx, "my PR claim");
+    try {
+      const { diff } = prepareDiff("my diff", testCtx);
+      if (!diff.includes("my PR claim") || !diff.includes("my diff")) throw new Error("selfcheck: context not prepended");
+    } finally {
+      fs.unlinkSync(testCtx);
+    }
+    const { diff: noCtxDiff } = prepareDiff("my diff", "nonexistent.tmp");
+    if (noCtxDiff !== "my diff") throw new Error("selfcheck: missing context file is not a no-op");
+
+    fs.writeFileSync(testCtx, "A".repeat(10000));
+    try {
+      const { diff: truncCtx } = prepareDiff("my diff", testCtx);
+      if (!truncCtx.includes("context truncated") || truncCtx.length > 9000) throw new Error("selfcheck: context not truncated at 8000");
+      const bigDiff = "D".repeat(MAX_DIFF_CHARS);
+      const { diff: truncCombined, truncated } = prepareDiff(bigDiff, testCtx);
+      if (!truncated || truncCombined.length > MAX_DIFF_CHARS) throw new Error("selfcheck: combined truncation failed");
+      if (!truncCombined.startsWith("===== PR CONTEXT")) throw new Error("selfcheck: context was truncated instead of diff");
+    } finally {
+      fs.unlinkSync(testCtx);
+    }
+
     console.log("selfcheck ok");
     return;
   }
@@ -289,14 +352,14 @@ async function main() {
     return;
   }
 
-  let diff = diffFile && fs.existsSync(diffFile) ? fs.readFileSync(diffFile, "utf8") : "";
-  if (!diff.trim()) {
+  let diffRaw = diffFile && fs.existsSync(diffFile) ? fs.readFileSync(diffFile, "utf8") : "";
+  let { diff, truncated } = prepareDiff(diffRaw, process.env.PR_CONTEXT_FILE);
+
+  if (!diff) {
     write("# 🧑‍⚖️ LLM Council findings\n\n_Council skipped: empty diff._\n");
     console.log("Empty diff — council skipped.");
     return;
   }
-  const truncated = diff.length > MAX_DIFF_CHARS;
-  if (truncated) diff = diff.slice(0, MAX_DIFF_CHARS);
 
   console.log(`Council: ${models.map((m) => `${m.name} [${m.provider}]`).join(", ")}`);
   const councilStartedAt = Date.now();

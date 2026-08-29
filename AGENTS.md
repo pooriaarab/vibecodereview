@@ -24,6 +24,7 @@ never fork its provider/lens logic into the surfaces.
 - Providers: `openai`, `gemini`, `moonshot`, `openrouter`. Add one by extending
   `PROVIDERS` + `DEFAULT_MODELS` in the engine only.
 - A member with no API key must skip with a note, never throw.
+- The council uses a scope lens to verify atomicity and claim alignment. Set `PR_CONTEXT_FILE` to a file containing the author's claim (title, body, closed issues) to feed this lens.
 - A composite action's `inputs:` block must contain NO `${{ }}` expressions — not in a default AND not in a description string; GitHub parses them and fails at 'Set up job'. Callers pass github_token explicitly.
 - Secrets never land in git. CI secrets live in repo settings; local keys in env.
 - After any engine change, run `node scripts/council-review.mjs --selfcheck`.
