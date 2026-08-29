@@ -16,7 +16,7 @@ const REPO = "pooriaarab/vibecodereview";
 const version = process.argv[2];
 const apply = process.argv.includes("--apply");
 
-if (!/^\d+\.\d+\.\d+$/.test(version || "")) {
+if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(version || "")) {
   console.error("usage: release.mjs <major.minor.patch> [--apply]");
   process.exit(2);
 }
@@ -65,28 +65,36 @@ const tagExists = existingTagSha !== null;
 const majorExists = refSha(`tags/${major}`) !== null;
 
 // vX is documented as always pointing at the newest vX.Y.Z of that major line.
-// Releasing an older/out-of-order version (a typo, or an old branch cut by
-// mistake) would force-move vX backward — a regression shipped to every
-// consuming repo pinned to @vX. Refuse unless this version is the highest
-// vX.*.* tag that exists.
-if (!tagExists) {
-  const majorNum = major.slice(1);
-  const siblingRefs = JSON.parse(gh(["api", `repos/${REPO}/git/matching-refs/tags/${major}.`]) || "[]");
-  const verRe = new RegExp(`^v${majorNum}\\.(\\d+)\\.(\\d+)$`);
-  const existingVersions = siblingRefs
-    .map((r) => r.ref.split("/").pop().match(verRe))
-    .filter(Boolean)
-    .map((m) => [Number(majorNum), Number(m[1]), Number(m[2])]);
-  const newVer = version.split(".").map(Number);
-  const cmp = (a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2];
-  const highest = existingVersions.sort(cmp).pop();
-  if (highest && cmp(newVer, highest) <= 0) {
-    console.error(
-      `${tag} is not newer than existing v${highest.join(".")}. ` +
-        `Moving ${major} backward would regress every repo pinned to @${major}. Pick a version above v${highest.join(".")}.`,
-    );
-    process.exit(1);
-  }
+// Releasing an older/out-of-order version (a typo, an old branch cut by mistake,
+// or resuming a stale partial-apply after a newer version has since shipped from
+// a later main) would force-move vX backward — a regression shipped to every
+// consuming repo pinned to @vX. Refuse unless this version is at least as new as
+// every other vX.*.* tag that exists. This runs even when resuming (tagExists):
+// this tag already pointing at the current sha says nothing about whether a
+// higher sibling was tagged in the meantime, so it is excluded from the
+// comparison rather than used to skip it. --paginate/--slurp because a major
+// line can outgrow the API's single-page default and silently hide the highest
+// version otherwise.
+const majorNum = major.slice(1);
+const siblingRefs = JSON.parse(
+  gh(["api", "--paginate", "--slurp", `repos/${REPO}/git/matching-refs/tags/${major}.`]) || "[]",
+).flat();
+const verRe = new RegExp(`^v${majorNum}\\.(\\d+)\\.(\\d+)$`);
+const existingVersions = siblingRefs
+  .map((r) => r.ref.split("/").pop())
+  .filter((name) => name !== tag)
+  .map((name) => name.match(verRe))
+  .filter(Boolean)
+  .map((m) => [Number(majorNum), Number(m[1]), Number(m[2])]);
+const newVer = version.split(".").map(Number);
+const cmp = (a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2];
+const highest = existingVersions.sort(cmp).pop();
+if (highest && cmp(newVer, highest) <= 0) {
+  console.error(
+    `${tag} is not newer than existing v${highest.join(".")}. ` +
+      `Moving ${major} backward would regress every repo pinned to @${major}. Pick a version above v${highest.join(".")}.`,
+  );
+  process.exit(1);
 }
 
 console.log(`main      ${sha}`);
