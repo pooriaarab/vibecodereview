@@ -24,6 +24,8 @@
 // Optional full override: COUNCIL_MODELS = CSV of "provider|model|Name|lens".
 
 import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 const MAX_DIFF_CHARS = 180_000; // bound tokens/cost on large PRs
 // Members run in parallel, so the council costs max(member latency), not the
@@ -317,20 +319,26 @@ async function main() {
     }
     if (!r2.error?.includes("CUSTOM_BASE_URL")) throw new Error("selfcheck: custom no-url path wrong: " + r2.error);
 
-    const testModels = parseModels();
-    if (!testModels.some((m) => m.lens === "scope")) throw new Error("selfcheck: scope lens missing from default members");
+    // Assert DEFAULT_MODELS, not parseModels(): parseModels reads COUNCIL_MODELS
+    // from the environment, so a repo that legitimately overrides the member list
+    // would fail the selfcheck that AGENTS.md requires it to run.
+    if (!DEFAULT_MODELS.some((m) => m.lens === "scope")) throw new Error("selfcheck: scope lens missing from default members");
 
-    const testCtx = "test_ctx.tmp";
+    // A unique temp dir, not a fixed name in the working directory: the old
+    // fixture would clobber a real test_ctx.tmp and broke concurrent runs.
+    const testDir = fs.mkdtempSync(path.join(os.tmpdir(), "council-selfcheck-"));
+    const testCtx = path.join(testDir, "ctx.txt");
     fs.writeFileSync(testCtx, "my PR claim");
     try {
       const { diff } = prepareDiff("my diff", testCtx);
       if (!diff.includes("my PR claim") || !diff.includes("my diff")) throw new Error("selfcheck: context not prepended");
     } finally {
-      fs.unlinkSync(testCtx);
+      fs.rmSync(testDir, { recursive: true, force: true });
     }
-    const { diff: noCtxDiff } = prepareDiff("my diff", "nonexistent.tmp");
+    const { diff: noCtxDiff } = prepareDiff("my diff", path.join(testDir, "nonexistent.tmp"));
     if (noCtxDiff !== "my diff") throw new Error("selfcheck: missing context file is not a no-op");
 
+    fs.mkdirSync(testDir, { recursive: true });
     fs.writeFileSync(testCtx, "A".repeat(10000));
     try {
       const { diff: truncCtx } = prepareDiff("my diff", testCtx);
@@ -351,7 +359,7 @@ async function main() {
       const { diff: noRoom } = prepareDiff("D".repeat(MAX_DIFF_CHARS - 50), testCtx);
       if (noRoom.includes("===== PR CONTEXT")) throw new Error("selfcheck: shipped a context fragment with no room");
     } finally {
-      fs.unlinkSync(testCtx);
+      fs.rmSync(testDir, { recursive: true, force: true });
     }
 
     console.log("selfcheck ok");
