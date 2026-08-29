@@ -272,9 +272,10 @@ function prepareDiff(diffText, ctxFile) {
   let ctxText = "";
   if (rawCtx) {
     const room = MAX_DIFF_CHARS - diffText.length - FRAME;
-    // Below this there is no room for context worth reading, so drop it whole
-    // rather than ship a framed fragment.
-    if (room >= 200) ctxText = HEAD + rawCtx.slice(0, room) + FOOT;
+    // Keep the context when it fits whole, however little room is left. The
+    // 200 floor exists only to avoid shipping a truncated fragment, so applying
+    // it to a short claim that would have fitted dropped context for no reason.
+    if (rawCtx.length <= room || room >= 200) ctxText = HEAD + rawCtx.slice(0, room) + FOOT;
   }
   const finalDiff = diffText.slice(0, MAX_DIFF_CHARS - ctxText.length);
   return { diff: ctxText + finalDiff, truncated };
