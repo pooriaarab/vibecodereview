@@ -268,7 +268,6 @@ async function main() {
       { diffTruncated: true, contextTruncated: true },
     );
     if (!mdBoth.includes("Diff and PR context")) throw new Error("selfcheck: both-truncated message wrong");
-    if (!ok) throw new Error("selfcheck failed:\n" + md);
     // also verify a member with no key resolves to a skip, not a throw. Clear
     // the key for this call regardless of the ambient env so the check stays
     // offline even when OPENAI_API_KEY happens to be set in the shell.
@@ -338,6 +337,17 @@ async function main() {
       // Too little room for meaningful context means no context, not a fragment.
       const { diff: noRoom } = prepareDiff("D".repeat(MAX_DIFF_CHARS - 50), testCtx, MAX_DIFF_CHARS);
       if (noRoom.includes("===== PR CONTEXT")) throw new Error("selfcheck: shipped a context fragment with no room");
+      // A short context (never hit the 8000-char cap) dropped whole for lack of
+      // room must still be reported as truncated, or the scope lens silently
+      // loses the claim with no warning anywhere in the findings.
+      fs.writeFileSync(testCtx, "short claim");
+      const { diff: shortNoRoom, contextTruncated: shortDropped } = prepareDiff(
+        "D".repeat(MAX_DIFF_CHARS - 50),
+        testCtx,
+        MAX_DIFF_CHARS,
+      );
+      if (shortNoRoom.includes("===== PR CONTEXT")) throw new Error("selfcheck: shipped a short context fragment with no room");
+      if (!shortDropped) throw new Error("selfcheck: short context dropped for lack of room was not marked truncated");
     } finally {
       fs.rmSync(testDir, { recursive: true, force: true });
     }

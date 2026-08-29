@@ -57,6 +57,10 @@ export function prepareDiff(diffText, ctxFile, maxChars) {
         contextTruncated = true;
       }
       ctxText = HEAD + ctx + FOOT;
+    } else {
+      // No room at all: the context is dropped whole, not merely cut. Still a
+      // truncation — the scope lens gets no claim and must be told why.
+      contextTruncated = true;
     }
   }
   const diffTruncated = diffText.length > maxChars - ctxText.length;
