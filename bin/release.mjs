@@ -35,7 +35,20 @@ const refSha = (ref) => {
       encoding: "utf8",
       stdio: ["pipe", "pipe", "pipe"],
     });
-    return JSON.parse(out).object.sha;
+    const obj = JSON.parse(out).object;
+    // An annotated tag's ref points at the TAG object, not at the commit. Every
+    // tag here is lightweight today, so this never mattered; one `git tag -a`
+    // or a differently-cut release would make the sha comparison below compare
+    // a tag object against a commit, never match, and refuse to resume a
+    // version that is in fact correct. Resolve through to the commit.
+    if (obj.type === "tag") {
+      const tagObj = execFileSync("gh", ["api", `repos/${REPO}/git/tags/${obj.sha}`], {
+        encoding: "utf8",
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+      return JSON.parse(tagObj).object.sha;
+    }
+    return obj.sha;
   } catch (e) {
     if (typeof e.stderr === "string" && /HTTP 404/.test(e.stderr)) return null;
     console.error(e.stderr || e.message);
