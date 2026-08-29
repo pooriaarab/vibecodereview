@@ -77,25 +77,34 @@ runs:
       env:
         GH_TOKEN: ${{ inputs.github_token }}
       run: |
+        # Single GraphQL query replaces the two sequential calls (gh pr view +
+        # gh api graphql). One round trip instead of two. The query returns
+        # title, body and closing issues together; jq formats them into the
+        # same shape the two-step produced.
         PR_NUM="${{ github.event.pull_request.number }}"
         REPO="${{ github.repository }}"
-        gh pr view "$PR_NUM" --json title,body --jq '"TITLE: \(.title)\n\nBODY:\n\(.body)"' > "$RUNNER_TEMP/pr-context.txt" || true
         OWNER="${REPO%/*}"
         NAME="${REPO#*/}"
         gh api graphql -F owner="$OWNER" -F repo="$NAME" -F pr="$PR_NUM" -f query='
           query($owner: String!, $repo: String!, $pr: Int!) {
             repository(owner: $owner, name: $repo) {
               pullRequest(number: $pr) {
+                title
+                body
                 closingIssuesReferences(first: 10) {
-                  nodes {
-                    title
-                    body
-                  }
+                  nodes { title body }
                 }
               }
             }
           }
-        ' --jq '.data.repository.pullRequest.closingIssuesReferences.nodes[] | select(. != null) | "\n--- LINKED ISSUE: \(.title) ---\n\(.body)"' >> "$RUNNER_TEMP/pr-context.txt" || true
+        ' --jq '"TITLE: \(.data.repository.pullRequest.title)\n\nBODY:\n\(.data.repository.pullRequest.body // "")\n" + ([
+          .data.repository.pullRequest.closingIssuesReferences.nodes // []
+          | .[] | select(. != null)
+          | "\n--- LINKED ISSUE: \(.title) ---\n\(.body // "")"
+        ] | join(""))' > "$RUNNER_TEMP/pr-context.txt" || true
+
+        # Same semantics as before: a failure to fetch context is a no-op,
+        # never an error, and the council still runs.
 
     # The council is network-bound and the setup below is not, so start the
     # fan-out here and collect it just before the chair. Everything between the

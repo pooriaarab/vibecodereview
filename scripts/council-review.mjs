@@ -218,14 +218,18 @@ async function callModelWithFallback(model, diff) {
   return { ...second, model: { ...fallback, name: `${model.name} (via OpenRouter)` } };
 }
 
-function buildFindingsMarkdown(results, { truncated } = {}) {
+function buildFindingsMarkdown(results, { diffTruncated, contextTruncated } = {}) {
   const lines = ["# 🧑‍⚖️ LLM Council findings", ""];
   lines.push(
     "Independent per-lens reviews from council models. Treat as co-reviewer input: de-dupe, verify each claim against the code, discard false positives, and only fix confidently-real issues.",
     "",
   );
-  if (truncated) {
+  if (diffTruncated && contextTruncated) {
+    lines.push("> ⚠️ Diff and PR context were truncated for length; council saw the first portion of each.", "");
+  } else if (diffTruncated) {
     lines.push("> ⚠️ Diff was truncated for length; council saw the first portion only.", "");
+  } else if (contextTruncated) {
+    lines.push("> ⚠️ PR context (title, body, linked issues) was truncated for length; the diff is complete.", "");
   }
   for (const r of results) {
     lines.push(`## ${r.model.name} — ${r.model.lens} lens`, "");
@@ -243,13 +247,27 @@ async function main() {
         { model: { name: "M1", lens: "security" }, text: "- **🔴 Critical** `a.ts:10` — bad. fix it." },
         { model: { name: "M2", lens: "performance" }, error: "timed out" },
       ],
-      { truncated: true },
+      { diffTruncated: true, contextTruncated: false },
     );
     const ok =
       md.includes("M1 — security lens") &&
       md.includes("_timed out_") &&
-      md.includes("truncated") &&
+      md.includes("Diff was truncated") &&
+      !md.includes("context") &&
       md.includes("🔴 Critical");
+    if (!ok) throw new Error("selfcheck failed:\n" + md);
+    // Verify context-only truncation message too.
+    const mdCtx = buildFindingsMarkdown(
+      [{ model: { name: "M1", lens: "correctness" }, text: "ok" }],
+      { diffTruncated: false, contextTruncated: true },
+    );
+    if (!mdCtx.includes("PR context")) throw new Error("selfcheck: context-only truncation message wrong");
+    // Verify both-truncated message.
+    const mdBoth = buildFindingsMarkdown(
+      [{ model: { name: "M1", lens: "correctness" }, text: "ok" }],
+      { diffTruncated: true, contextTruncated: true },
+    );
+    if (!mdBoth.includes("Diff and PR context")) throw new Error("selfcheck: both-truncated message wrong");
     if (!ok) throw new Error("selfcheck failed:\n" + md);
     // also verify a member with no key resolves to a skip, not a throw. Clear
     // the key for this call regardless of the ambient env so the check stays
@@ -300,8 +318,11 @@ async function main() {
       const { diff: truncCtx } = prepareDiff("my diff", testCtx, MAX_DIFF_CHARS);
       if (!truncCtx.includes("context truncated") || truncCtx.length > 9000) throw new Error("selfcheck: context not truncated at 8000");
       const bigDiff = "D".repeat(MAX_DIFF_CHARS);
-      const { diff: truncCombined, truncated } = prepareDiff(bigDiff, testCtx, MAX_DIFF_CHARS);
-      if (!truncated || truncCombined.length > MAX_DIFF_CHARS) throw new Error("selfcheck: combined truncation failed");
+      const { diff: truncCombined, diffTruncated, contextTruncated } = prepareDiff(bigDiff, testCtx, MAX_DIFF_CHARS);
+      // Context was cut but the diff (which fills the whole budget) is intact.
+      if (diffTruncated) throw new Error("selfcheck: diff was truncated when it filled the budget");
+      if (!contextTruncated) throw new Error("selfcheck: context should have been marked truncated");
+      if (truncCombined.length > MAX_DIFF_CHARS) throw new Error("selfcheck: combined truncation failed");
       // A diff that already fills the budget must keep every character of it.
       if (truncCombined !== bigDiff) throw new Error("selfcheck: diff was truncated to make room for context");
       const { diff: partial } = prepareDiff("D".repeat(MAX_DIFF_CHARS - 4000), testCtx, MAX_DIFF_CHARS);
@@ -350,7 +371,7 @@ async function main() {
   }
 
   const diffRaw = diffFile && fs.existsSync(diffFile) ? fs.readFileSync(diffFile, "utf8") : "";
-  const { diff, truncated } = prepareDiff(diffRaw, process.env.PR_CONTEXT_FILE, MAX_DIFF_CHARS);
+  const { diff, diffTruncated, contextTruncated } = prepareDiff(diffRaw, process.env.PR_CONTEXT_FILE, MAX_DIFF_CHARS);
 
   if (!diff) {
     write("# 🧑‍⚖️ LLM Council findings\n\n_Council skipped: empty diff._\n");
@@ -369,7 +390,7 @@ async function main() {
     `Council wall time: ${((Date.now() - councilStartedAt) / 1000).toFixed(1)}s (timeout ${REQUEST_TIMEOUT_MS / 1000}s)`,
   );
 
-  write(buildFindingsMarkdown(results, { truncated }));
+  write(buildFindingsMarkdown(results, { diffTruncated, contextTruncated }));
   console.log(`Wrote ${outFile}`);
 }
 

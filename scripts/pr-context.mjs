@@ -14,9 +14,10 @@ const MAX_CTX_CHARS = 8000;
 const MIN_CTX_ROOM = 200;
 
 export function prepareDiff(diffText, ctxFile, maxChars) {
-  if (!diffText.trim()) return { diff: "", truncated: false };
+  if (!diffText.trim()) return { diff: "", diffTruncated: false, contextTruncated: false };
 
   let rawCtx = "";
+  let contextTruncated = false;
   if (ctxFile && fs.existsSync(ctxFile)) {
     try {
       // The title and body are author-controlled text going verbatim into the
@@ -28,7 +29,10 @@ export function prepareDiff(diffText, ctxFile, maxChars) {
       rawCtx = fs.readFileSync(ctxFile, "utf8").trim();
       // Slice to leave room for the marker, so the result honours the cap it
       // advertises instead of exceeding it by the marker's own length.
-      if (rawCtx.length > MAX_CTX_CHARS) rawCtx = rawCtx.slice(0, MAX_CTX_CHARS - CTX_CUT.length) + CTX_CUT;
+      if (rawCtx.length > MAX_CTX_CHARS) {
+        rawCtx = rawCtx.slice(0, MAX_CTX_CHARS - CTX_CUT.length) + CTX_CUT;
+        contextTruncated = true;
+      }
     } catch {
       // An unreadable context file is a no-op, never an error. Same discipline
       // as a missing API key: the council degrades, it does not fail the PR.
@@ -40,7 +44,6 @@ export function prepareDiff(diffText, ctxFile, maxChars) {
   // So when the two do not both fit, the context yields first, all the way to
   // nothing. Only rawCtx is ever cut, never the assembled string: slicing that
   // could clip the closing marker and run author text into a diff hunk.
-  const truncated = (rawCtx ? rawCtx.length + FRAME : 0) + diffText.length > maxChars;
   let ctxText = "";
   if (rawCtx) {
     const room = maxChars - diffText.length - FRAME;
@@ -49,10 +52,14 @@ export function prepareDiff(diffText, ctxFile, maxChars) {
       // Mark this cut too. An unmarked truncation hands the scope lens half a
       // claim and lets it read that as the whole claim, so it can report a
       // mismatch against a sentence that simply stopped early.
-      if (ctx.length > room) ctx = ctx.slice(0, Math.max(0, room - CTX_CUT.length)) + CTX_CUT;
+      if (ctx.length > room) {
+        ctx = ctx.slice(0, Math.max(0, room - CTX_CUT.length)) + CTX_CUT;
+        contextTruncated = true;
+      }
       ctxText = HEAD + ctx + FOOT;
     }
   }
+  const diffTruncated = diffText.length > maxChars - ctxText.length;
   const finalDiff = diffText.slice(0, maxChars - ctxText.length);
-  return { diff: ctxText + finalDiff, truncated };
+  return { diff: ctxText + finalDiff, diffTruncated, contextTruncated };
 }

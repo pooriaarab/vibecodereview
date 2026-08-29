@@ -48,7 +48,7 @@ function truncate(s, n) {
   return s.length > n ? s.slice(0, n) : s;
 }
 
-async function askChair(diff, council, truncated) {
+async function askChair(diff, council, diffTruncated) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   try {
@@ -68,7 +68,7 @@ async function askChair(diff, council, truncated) {
           {
             role: "user",
             content:
-              (truncated ? "NOTE: this diff was truncated for length. Judge only what you can see.\n\n" : "") +
+              (diffTruncated ? "NOTE: this diff was truncated for length. Judge only what you can see.\n\n" : "") +
               `PR diff:\n\n${diff}\n\n---\n\nCouncil findings:\n\n${council}`,
           },
         ],
@@ -128,7 +128,7 @@ function verdictFlag(findings, claimed) {
   return claimed === "approve" ? "--approve" : "--comment";
 }
 
-function renderBody(parsed, findings, { truncated } = {}) {
+function renderBody(parsed, findings, { diffTruncated } = {}) {
   const order = { Critical: 0, Major: 1, Minor: 2 };
   const sorted = findings.toSorted((a, b) => (order[a.severity] ?? 3) - (order[b.severity] ?? 3));
   const icon = { Critical: "🔴", Major: "🟠", Minor: "🟡" };
@@ -143,7 +143,7 @@ function renderBody(parsed, findings, { truncated } = {}) {
     parsed.summary || "_No summary._",
     "",
   ];
-  if (truncated) {
+  if (diffTruncated) {
     lines.push("> ⚠️ The diff was truncated for length; this review covers the first portion only.", "");
   }
   if (sorted.length) {
@@ -170,8 +170,8 @@ async function main() {
   const council =
     councilFile && fs.existsSync(councilFile) ? fs.readFileSync(councilFile, "utf8") : "_No council findings._";
 
-  const truncated = diff.length > MAX_DIFF_CHARS;
-  const parsed = parseVerdict(await askChair(truncate(diff, MAX_DIFF_CHARS), council, truncated));
+  const diffTruncated = diff.length > MAX_DIFF_CHARS;
+  const parsed = parseVerdict(await askChair(truncate(diff, MAX_DIFF_CHARS), council, diffTruncated));
   const findings = normalizeFindings(parsed);
   // A syntactically-valid but empty reply ({}) would otherwise post "_No
   // summary._" with no findings and still report the step as a success —
@@ -180,7 +180,7 @@ async function main() {
   if (!parsed.summary?.trim() && findings.length === 0) {
     throw new Error("chair reply had neither a summary nor any findings");
   }
-  const body = renderBody(parsed, findings, { truncated });
+  const body = renderBody(parsed, findings, { diffTruncated });
   const flag = verdictFlag(findings, parsed.verdict);
 
   fs.writeFileSync("chair-fallback-review.md", body);
