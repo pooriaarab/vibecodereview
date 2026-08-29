@@ -46,6 +46,29 @@ never fork its provider/lens logic into the surfaces.
   `total_cost_usd: 0` and an empty `modelUsage` never reached the model — that is
   an exhausted or invalid subscription, not a bad prompt. Fix the token.
 
+## Releasing
+
+Two tags per release, never one.
+
+| Tag | Mutable | Who follows it |
+|---|---|---|
+| `vX.Y.Z` | never moved | anyone who pins a version, and rollback |
+| `vX` | force-moved to the newest `vX.Y.Z` | the ~80 repos whose workflow says `@v1` |
+
+    node bin/release.mjs 1.2.0            # dry run, prints the plan
+    node bin/release.mjs 1.2.0 --apply    # create v1.2.0, move v1 to it
+    gh release create v1.2.0 --notes "..."
+
+The immutable tag is the point. Without it there is no way to say which version
+a repo is on, and no way back except a SHA dug out of `git log`. This repo ran
+that way until `v1.0.0` was cut retroactively at whatever `v1` happened to point
+at, purely so a rollback target existed.
+
+**Moving `vX` is a deployment to every repo that follows it.** Nothing else in
+this repo reaches production; merging to `main` changes nothing for a consumer.
+So treat the move as the release, say what it costs in the notes, and remember a
+new council member costs a model call per PR in all of them.
+
 ## Confidentiality
 
 vibecodereview sends diffs to third-party model providers. Use it on **personal /
