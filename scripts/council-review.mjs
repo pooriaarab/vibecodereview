@@ -235,23 +235,25 @@ function buildFindingsMarkdown(results, { truncated } = {}) {
 function prepareDiff(diffText, ctxFile) {
   if (!diffText.trim()) return { diff: "", truncated: false };
 
-  let ctxText = "";
+  const HEAD = "===== PR CONTEXT (title, body, linked issue) =====\n";
+  const FOOT = "\n===== DIFF =====\n";
+  const FRAME = HEAD.length + FOOT.length;
+
+  let rawCtx = "";
   if (ctxFile && fs.existsSync(ctxFile)) {
     try {
-      let rawCtx = fs.readFileSync(ctxFile, "utf8").trim();
-      if (rawCtx) {
-        if (rawCtx.length > 8000) rawCtx = rawCtx.slice(0, 8000) + "\n... (context truncated)";
-        // The title and body are author-controlled text going verbatim into the
-        // prompt, so instruction injection is possible in principle. Three things
-        // bound it: the action only runs on the repo owner's own PRs, the system
-        // prompt tells every member to treat this as a claim rather than ground
-        // truth, and the council's output is advisory. The chair verifies each
-        // finding against the code before acting on it. Accepted residual risk.
-        ctxText = `===== PR CONTEXT (title, body, linked issue) =====\n${rawCtx}\n===== DIFF =====\n`;
-      }
+      // The title and body are author-controlled text going verbatim into the
+      // prompt, so instruction injection is possible in principle. Three things
+      // bound it: the action only runs on the repo owner's own PRs, the system
+      // prompt tells every member to treat this as a claim rather than ground
+      // truth, and the council's output is advisory. The chair verifies each
+      // finding against the code before acting on it. Accepted residual risk.
+      rawCtx = fs.readFileSync(ctxFile, "utf8").trim();
+      if (rawCtx.length > 8000) rawCtx = rawCtx.slice(0, 8000) + "\n... (context truncated)";
     } catch {
       // An unreadable context file is a no-op, never an error. Same discipline
       // as a missing API key: the council degrades, it does not fail the PR.
+      rawCtx = "";
     }
   }
 
@@ -259,10 +261,18 @@ function prepareDiff(diffText, ctxFile) {
   // So when the two do not both fit, the context yields first, all the way to
   // nothing. Spending diff tail on boilerplate would degrade every lens in
   // order to help one.
-  const truncated = ctxText.length + diffText.length > MAX_DIFF_CHARS;
-  if (truncated) {
-    const room = Math.max(0, MAX_DIFF_CHARS - diffText.length);
-    ctxText = ctxText.slice(0, room);
+  //
+  // Only rawCtx is ever cut. The two markers are what keep claim and evidence
+  // apart, so slicing the assembled string instead could clip the closing
+  // marker and run author-supplied text straight into a diff hunk with nothing
+  // between them, which is precisely the confusion the markers exist to stop.
+  const truncated = (rawCtx ? rawCtx.length + FRAME : 0) + diffText.length > MAX_DIFF_CHARS;
+  let ctxText = "";
+  if (rawCtx) {
+    const room = MAX_DIFF_CHARS - diffText.length - FRAME;
+    // Below this there is no room for context worth reading, so drop it whole
+    // rather than ship a framed fragment.
+    if (room >= 200) ctxText = HEAD + rawCtx.slice(0, room) + FOOT;
   }
   const finalDiff = diffText.slice(0, MAX_DIFF_CHARS - ctxText.length);
   return { diff: ctxText + finalDiff, truncated };
@@ -333,6 +343,13 @@ async function main() {
       const { diff: partial } = prepareDiff("D".repeat(MAX_DIFF_CHARS - 4000), testCtx);
       if (!partial.startsWith("===== PR CONTEXT")) throw new Error("selfcheck: context dropped when it still fit");
       if (partial.length > MAX_DIFF_CHARS) throw new Error("selfcheck: partial context exceeded the cap");
+      // A truncated context must still be closed by the DIFF marker, or author
+      // text runs straight into a diff hunk.
+      if (!partial.includes("\n===== DIFF =====\n")) throw new Error("selfcheck: truncation clipped the DIFF marker");
+      if (partial.split("===== DIFF =====").length !== 2) throw new Error("selfcheck: DIFF marker not exactly once");
+      // Too little room for meaningful context means no context, not a fragment.
+      const { diff: noRoom } = prepareDiff("D".repeat(MAX_DIFF_CHARS - 50), testCtx);
+      if (noRoom.includes("===== PR CONTEXT")) throw new Error("selfcheck: shipped a context fragment with no room");
     } finally {
       fs.unlinkSync(testCtx);
     }
