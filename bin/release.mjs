@@ -26,25 +26,38 @@ const tag = `v${version}`;
 const gh = (args, input) =>
   execFileSync("gh", args, { encoding: "utf8", input, stdio: ["pipe", "pipe", "inherit"] }).trim();
 
+// Like `gh`, but captures stderr instead of inheriting it, so a 404 (ref
+// missing) can be told apart from an auth/network/rate-limit/5xx failure.
+const refExists = (ref) => {
+  try {
+    execFileSync("gh", ["api", `repos/${REPO}/git/refs/${ref}`], {
+      encoding: "utf8",
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    return true;
+  } catch (e) {
+    if (typeof e.stderr === "string" && /HTTP 404/.test(e.stderr)) return false;
+    console.error(e.stderr || e.message);
+    process.exit(1);
+  }
+};
+
 const sha = JSON.parse(gh(["api", `repos/${REPO}/git/refs/heads/main`])).object.sha;
 
 // Refuse to reuse an immutable tag. Moving one would silently change what a
 // pinned consumer resolves to, which is the whole thing immutability buys.
-let exists = false;
-try {
-  gh(["api", `repos/${REPO}/git/refs/tags/${tag}`]);
-  exists = true;
-} catch {
-  exists = false;
-}
-if (exists) {
+if (refExists(`tags/${tag}`)) {
   console.error(`${tag} already exists. Immutable tags are never moved. Pick the next version.`);
   process.exit(1);
 }
+// A brand-new major (e.g. the first 2.0.0) has no vX ref to move yet, so it
+// must be created (POST) rather than moved (PATCH), or the release half-completes:
+// vX.Y.Z gets tagged and the major pointer is never created.
+const majorExists = refExists(`tags/${major}`);
 
 console.log(`main      ${sha}`);
 console.log(`create    ${tag} -> ${sha.slice(0, 7)}`);
-console.log(`move      ${major} -> ${sha.slice(0, 7)}`);
+console.log(`${majorExists ? "move     " : "create   "} ${major} -> ${sha.slice(0, 7)}`);
 if (!apply) {
   console.log("\ndry run. Nothing was written. Re-run with --apply.");
   process.exit(0);
@@ -54,6 +67,11 @@ gh(["api", `repos/${REPO}/git/refs`, "-X", "POST", "-f", `ref=refs/tags/${tag}`,
 console.log(`created ${tag}`);
 // The major pointer is the only tag this force-updates, and it is the one
 // consumers opted into by writing @v1 rather than a pinned version.
-gh(["api", `repos/${REPO}/git/refs/tags/${major}`, "-X", "PATCH", "-f", `sha=${sha}`, "-F", "force=true"]);
-console.log(`moved ${major} -> ${tag}`);
+if (majorExists) {
+  gh(["api", `repos/${REPO}/git/refs/tags/${major}`, "-X", "PATCH", "-f", `sha=${sha}`, "-F", "force=true"]);
+  console.log(`moved ${major} -> ${tag}`);
+} else {
+  gh(["api", `repos/${REPO}/git/refs`, "-X", "POST", "-f", `ref=refs/tags/${major}`, "-f", `sha=${sha}`]);
+  console.log(`created ${major} -> ${tag}`);
+}
 console.log(`\nNow write the release notes:\n  gh release create ${tag} --repo ${REPO} --title "${tag}" --notes "..."`);
