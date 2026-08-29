@@ -237,6 +237,7 @@ function buildFindingsMarkdown(results, { truncated } = {}) {
 function prepareDiff(diffText, ctxFile) {
   if (!diffText.trim()) return { diff: "", truncated: false };
 
+  const CTX_CUT = "\n... (context truncated)";
   const HEAD = "===== PR CONTEXT (title, body, linked issue) =====\n";
   const FOOT = "\n===== DIFF =====\n";
   const FRAME = HEAD.length + FOOT.length;
@@ -251,7 +252,7 @@ function prepareDiff(diffText, ctxFile) {
       // truth, and the council's output is advisory. The chair verifies each
       // finding against the code before acting on it. Accepted residual risk.
       rawCtx = fs.readFileSync(ctxFile, "utf8").trim();
-      if (rawCtx.length > 8000) rawCtx = rawCtx.slice(0, 8000) + "\n... (context truncated)";
+      if (rawCtx.length > 8000) rawCtx = rawCtx.slice(0, 8000) + CTX_CUT;
     } catch {
       // An unreadable context file is a no-op, never an error. Same discipline
       // as a missing API key: the council degrades, it does not fail the PR.
@@ -275,7 +276,14 @@ function prepareDiff(diffText, ctxFile) {
     // Keep the context when it fits whole, however little room is left. The
     // 200 floor exists only to avoid shipping a truncated fragment, so applying
     // it to a short claim that would have fitted dropped context for no reason.
-    if (rawCtx.length <= room || room >= 200) ctxText = HEAD + rawCtx.slice(0, room) + FOOT;
+    if (rawCtx.length <= room || room >= 200) {
+      let ctx = rawCtx;
+      // Mark this cut too. An unmarked truncation hands the scope lens half a
+      // claim and lets it read that as the whole claim, so it can report a
+      // mismatch between the diff and a sentence that simply stopped early.
+      if (ctx.length > room) ctx = ctx.slice(0, Math.max(0, room - CTX_CUT.length)) + CTX_CUT;
+      ctxText = HEAD + ctx + FOOT;
+    }
   }
   const finalDiff = diffText.slice(0, MAX_DIFF_CHARS - ctxText.length);
   return { diff: ctxText + finalDiff, truncated };
@@ -355,6 +363,9 @@ async function main() {
       // A truncated context must still be closed by the DIFF marker, or author
       // text runs straight into a diff hunk.
       if (!partial.includes("\n===== DIFF =====\n")) throw new Error("selfcheck: truncation clipped the DIFF marker");
+      // A second, tighter cut must announce itself too, not just the first.
+      const ctxPart = partial.slice(0, partial.indexOf("===== DIFF ====="));
+      if (!ctxPart.includes("context truncated")) throw new Error("selfcheck: second cut left no truncation marker");
       if (partial.split("===== DIFF =====").length !== 2) throw new Error("selfcheck: DIFF marker not exactly once");
       // Too little room for meaningful context means no context, not a fragment.
       const { diff: noRoom } = prepareDiff("D".repeat(MAX_DIFF_CHARS - 50), testCtx);
