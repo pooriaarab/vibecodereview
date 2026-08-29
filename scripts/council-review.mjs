@@ -352,8 +352,8 @@ async function main() {
     return;
   }
 
-  let diffRaw = diffFile && fs.existsSync(diffFile) ? fs.readFileSync(diffFile, "utf8") : "";
-  let { diff, truncated } = prepareDiff(diffRaw, process.env.PR_CONTEXT_FILE);
+  const diffRaw = diffFile && fs.existsSync(diffFile) ? fs.readFileSync(diffFile, "utf8") : "";
+  const { diff, truncated } = prepareDiff(diffRaw, process.env.PR_CONTEXT_FILE);
 
   if (!diff) {
     write("# 🧑‍⚖️ LLM Council findings\n\n_Council skipped: empty diff._\n");
