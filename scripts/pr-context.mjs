@@ -26,7 +26,9 @@ export function prepareDiff(diffText, ctxFile, maxChars) {
       // truth, and the council's output is advisory. The chair verifies each
       // finding against the code before acting on it. Accepted residual risk.
       rawCtx = fs.readFileSync(ctxFile, "utf8").trim();
-      if (rawCtx.length > MAX_CTX_CHARS) rawCtx = rawCtx.slice(0, MAX_CTX_CHARS) + CTX_CUT;
+      // Slice to leave room for the marker, so the result honours the cap it
+      // advertises instead of exceeding it by the marker's own length.
+      if (rawCtx.length > MAX_CTX_CHARS) rawCtx = rawCtx.slice(0, MAX_CTX_CHARS - CTX_CUT.length) + CTX_CUT;
     } catch {
       // An unreadable context file is a no-op, never an error. Same discipline
       // as a missing API key: the council degrades, it does not fail the PR.
