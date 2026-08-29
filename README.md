@@ -28,9 +28,10 @@ verdict, self-healing fix.
 | Gemini | generativelanguage.googleapis.com | `GEMINI_API_KEY` | performance, type design |
 | Kimi | api.moonshot.ai | `MOONSHOT_API_KEY` | security |
 | Grok / DeepSeek | openrouter.ai | `OPENROUTER_API_KEY` | maintainability, data integrity |
+| GPT-5.6 (scope) | openrouter.ai | `OPENROUTER_API_KEY` | scope and atomicity |
 
 A member with no key drops out. No key at all → the council step is skipped, and
-Claude still reviews alone. Nothing here blocks the PR on a provider outage.
+Claude still reviews alone. Nothing here blocks the PR on a provider outage. The scope lens reads the PR's title, body, and linked issues from `PR_CONTEXT_FILE` when available to verify the diff matches the author's claim.
 
 ## Use it in a repo
 

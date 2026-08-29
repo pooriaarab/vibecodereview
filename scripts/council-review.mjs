@@ -24,6 +24,9 @@
 // Optional full override: COUNCIL_MODELS = CSV of "provider|model|Name|lens".
 
 import fs from "node:fs";
+import { prepareDiff } from "./pr-context.mjs";
+import os from "node:os";
+import path from "node:path";
 
 const MAX_DIFF_CHARS = 180_000; // bound tokens/cost on large PRs
 // Members run in parallel, so the council costs max(member latency), not the
@@ -36,65 +39,14 @@ const REQUEST_TIMEOUT_MS = Number(process.env.COUNCIL_TIMEOUT_MS) || 90_000;
 
 // All providers expose an OpenAI-compatible /chat/completions endpoint
 // (Gemini via its OpenAI-compat URL), so one request shape serves all.
-const PROVIDERS = {
-  openai: { url: "https://api.openai.com/v1/chat/completions", keyEnv: "OPENAI_API_KEY" },
-  gemini: {
-    url: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
-    keyEnv: "GEMINI_API_KEY",
-  },
-  moonshot: { url: "https://api.moonshot.ai/v1/chat/completions", keyEnv: "MOONSHOT_API_KEY" },
-  openrouter: { url: "https://openrouter.ai/api/v1/chat/completions", keyEnv: "OPENROUTER_API_KEY" },
-  // Generic OpenAI-compatible endpoint (OpenRouter, self-hosted proxy, local
-  // OffRouter). URL comes from env at call time; unset means the member skips.
-  custom: { url: process.env.CUSTOM_BASE_URL, keyEnv: "CUSTOM_API_KEY" },
-};
-
-// Diverse lenses so each model catches what the others miss.
-const LENSES = {
-  correctness:
-    "logic bugs, incorrect conditionals, off-by-one, unhandled edge cases, race conditions, and SILENT FAILURES (swallowed errors, empty catch, fallbacks that hide real errors)",
-  performance:
-    "performance and efficiency: N+1 queries, unindexed/full-table scans, unnecessary re-renders, blocking I/O, memory blowups, and weak type design (types that allow invalid states)",
-  security:
-    "security (OWASP-aligned): broken authz/authn, tenant isolation gaps, injection, SSRF, secret exposure, unsafe redirects, and missing server-side input validation",
-  maintainability:
-    "maintainability and data integrity: dead/duplicated code, migration and data-loss risks, wrong or missing error handling, missing input validation, and broken API contracts",
-};
-
-// A native provider key that is present but out of credit answers in well under
-// a second with 401/402/429 — the member simply vanishes from the council and
-// the chair reviews alone. Measured on 2026-08-27: on 47 of the 48 repos running
-// this action, three of the four default members were 429-ing (OpenAI
-// `insufficient_quota`, Gemini monthly spend cap, Moonshot suspended balance),
-// so the "council" was one model. OpenRouter fronts all of these vendors, so a
-// single funded key can carry every lens. Map each native model to its
-// OpenRouter id and retry there when the native call fails on auth or quota.
-const OPENROUTER_EQUIVALENT = {
-  "gpt-5.6": "openai/gpt-5.6",
-  "gpt-5.6-terra-pro": "openai/gpt-5.6-terra-pro",
-  "gemini-3.1-pro-preview": "google/gemini-3.1-pro-preview",
-  "kimi-k3": "moonshotai/kimi-k3",
-};
-
-// Statuses that mean "this key will not work today", as opposed to a transient
-// server fault. Retrying the SAME key on these is pointless; a different route
-// is the only thing that can help.
-const CREDENTIAL_FAILURE_STATUSES = [401, 402, 403, 429];
-
-function openRouterFallbackFor(model) {
-  if (model.provider === "openrouter") return null;
-  if (!process.env.OPENROUTER_API_KEY?.trim()) return null;
-  const mapped = OPENROUTER_EQUIVALENT[model.model] || (model.model.includes("/") ? model.model : null);
-  if (!mapped) return null;
-  return { ...model, provider: "openrouter", model: mapped };
-}
-
-const DEFAULT_MODELS = [
-  { provider: "openai", model: process.env.OPENAI_MODEL || "gpt-5.6", name: "GPT-5.6 (Codex)", lens: "correctness" },
-  { provider: "gemini", model: process.env.GEMINI_MODEL || "gemini-3.1-pro-preview", name: "Gemini 3 Pro", lens: "performance" },
-  { provider: "moonshot", model: process.env.MOONSHOT_MODEL || "kimi-k3", name: "Kimi K3", lens: "security" },
-  { provider: "openrouter", model: process.env.OPENROUTER_MODEL || "x-ai/grok-4.5", name: "Grok 4.5", lens: "maintainability" },
-];
+import {
+  PROVIDERS,
+  LENSES,
+  OPENROUTER_EQUIVALENT,
+  CREDENTIAL_FAILURE_STATUSES,
+  openRouterFallbackFor,
+  DEFAULT_MODELS,
+} from "./council-config.mjs";
 
 function parseModels() {
   const csv = process.env.COUNCIL_MODELS?.trim();
@@ -119,6 +71,7 @@ function systemPrompt(lens) {
     "- Only flag issues INTRODUCED or directly touched by this diff. Ignore pre-existing code.",
     "- Report only issues you are confident are real defects. If you are guessing, drop it. Do not pad to hit a count.",
     "- Every finding MUST name a concrete failure trigger (specific input, state, or path). If you cannot name one, it is not a finding.",
+    "- If PR context is provided, treat it as the author's CLAIM, not ground truth. A mismatch between claim and diff is a finding for the scope lens.",
     "Output at most 5 findings, one per line, most important first:",
     "- `path:line` — the defect and the exact trigger in one sentence -> the fix in one sentence.",
     "If nothing clears the bar, reply with the single line: No findings.",
@@ -206,14 +159,18 @@ async function callModelWithFallback(model, diff) {
   return { ...second, model: { ...fallback, name: `${model.name} (via OpenRouter)` } };
 }
 
-function buildFindingsMarkdown(results, { truncated } = {}) {
+function buildFindingsMarkdown(results, { diffTruncated, contextTruncated } = {}) {
   const lines = ["# 🧑‍⚖️ LLM Council findings", ""];
   lines.push(
     "Independent per-lens reviews from council models. Treat as co-reviewer input: de-dupe, verify each claim against the code, discard false positives, and only fix confidently-real issues.",
     "",
   );
-  if (truncated) {
+  if (diffTruncated && contextTruncated) {
+    lines.push("> ⚠️ Diff and PR context were truncated for length; council saw the first portion of each.", "");
+  } else if (diffTruncated) {
     lines.push("> ⚠️ Diff was truncated for length; council saw the first portion only.", "");
+  } else if (contextTruncated) {
+    lines.push("> ⚠️ PR context (title, body, linked issues) was truncated for length; the diff is complete.", "");
   }
   for (const r of results) {
     lines.push(`## ${r.model.name} — ${r.model.lens} lens`, "");
@@ -223,6 +180,7 @@ function buildFindingsMarkdown(results, { truncated } = {}) {
   return lines.join("\n");
 }
 
+
 async function main() {
   if (process.argv.includes("--selfcheck")) {
     const md = buildFindingsMarkdown(
@@ -230,14 +188,27 @@ async function main() {
         { model: { name: "M1", lens: "security" }, text: "- **🔴 Critical** `a.ts:10` — bad. fix it." },
         { model: { name: "M2", lens: "performance" }, error: "timed out" },
       ],
-      { truncated: true },
+      { diffTruncated: true, contextTruncated: false },
     );
     const ok =
       md.includes("M1 — security lens") &&
       md.includes("_timed out_") &&
-      md.includes("truncated") &&
+      md.includes("Diff was truncated") &&
+      !md.includes("context") &&
       md.includes("🔴 Critical");
     if (!ok) throw new Error("selfcheck failed:\n" + md);
+    // Verify context-only truncation message too.
+    const mdCtx = buildFindingsMarkdown(
+      [{ model: { name: "M1", lens: "correctness" }, text: "ok" }],
+      { diffTruncated: false, contextTruncated: true },
+    );
+    if (!mdCtx.includes("PR context")) throw new Error("selfcheck: context-only truncation message wrong");
+    // Verify both-truncated message.
+    const mdBoth = buildFindingsMarkdown(
+      [{ model: { name: "M1", lens: "correctness" }, text: "ok" }],
+      { diffTruncated: true, contextTruncated: true },
+    );
+    if (!mdBoth.includes("Diff and PR context")) throw new Error("selfcheck: both-truncated message wrong");
     // also verify a member with no key resolves to a skip, not a throw. Clear
     // the key for this call regardless of the ambient env so the check stays
     // offline even when OPENAI_API_KEY happens to be set in the shell.
@@ -261,6 +232,67 @@ async function main() {
       PROVIDERS.custom.url = savedUrl;
     }
     if (!r2.error?.includes("CUSTOM_BASE_URL")) throw new Error("selfcheck: custom no-url path wrong: " + r2.error);
+
+    // Assert DEFAULT_MODELS, not parseModels(): parseModels reads COUNCIL_MODELS
+    // from the environment, so a repo that legitimately overrides the member list
+    // would fail the selfcheck that AGENTS.md requires it to run.
+    if (!DEFAULT_MODELS.some((m) => m.lens === "scope")) throw new Error("selfcheck: scope lens missing from default members");
+
+    // A unique temp dir, not a fixed name in the working directory: the old
+    // fixture would clobber a real test_ctx.tmp and broke concurrent runs.
+    const testDir = fs.mkdtempSync(path.join(os.tmpdir(), "council-selfcheck-"));
+    const testCtx = path.join(testDir, "ctx.txt");
+    fs.writeFileSync(testCtx, "my PR claim");
+    try {
+      const { diff } = prepareDiff("my diff", testCtx, MAX_DIFF_CHARS);
+      if (!diff.includes("my PR claim") || !diff.includes("my diff")) throw new Error("selfcheck: context not prepended");
+    } finally {
+      fs.rmSync(testDir, { recursive: true, force: true });
+    }
+    const { diff: noCtxDiff } = prepareDiff("my diff", path.join(testDir, "nonexistent.tmp"), MAX_DIFF_CHARS);
+    if (noCtxDiff !== "my diff") throw new Error("selfcheck: missing context file is not a no-op");
+
+    fs.mkdirSync(testDir, { recursive: true });
+    fs.writeFileSync(testCtx, "A".repeat(10000));
+    try {
+      const { diff: truncCtx } = prepareDiff("my diff", testCtx, MAX_DIFF_CHARS);
+      if (!truncCtx.includes("context truncated") || truncCtx.length > 9000) throw new Error("selfcheck: context not truncated at 8000");
+      const bigDiff = "D".repeat(MAX_DIFF_CHARS);
+      const { diff: truncCombined, diffTruncated, contextTruncated } = prepareDiff(bigDiff, testCtx, MAX_DIFF_CHARS);
+      // Context was cut but the diff (which fills the whole budget) is intact.
+      if (diffTruncated) throw new Error("selfcheck: diff was truncated when it filled the budget");
+      if (!contextTruncated) throw new Error("selfcheck: context should have been marked truncated");
+      if (truncCombined.length > MAX_DIFF_CHARS) throw new Error("selfcheck: combined truncation failed");
+      // A diff that already fills the budget must keep every character of it.
+      if (truncCombined !== bigDiff) throw new Error("selfcheck: diff was truncated to make room for context");
+      const { diff: partial } = prepareDiff("D".repeat(MAX_DIFF_CHARS - 4000), testCtx, MAX_DIFF_CHARS);
+      if (!partial.startsWith("===== PR CONTEXT")) throw new Error("selfcheck: context dropped when it still fit");
+      if (partial.length > MAX_DIFF_CHARS) throw new Error("selfcheck: partial context exceeded the cap");
+      // A truncated context must still be closed by the DIFF marker, or author
+      // text runs straight into a diff hunk.
+      if (!partial.includes("\n===== DIFF =====\n")) throw new Error("selfcheck: truncation clipped the DIFF marker");
+      // A second, tighter cut must announce itself too, not just the first.
+      const ctxPart = partial.slice(0, partial.indexOf("===== DIFF ====="));
+      if (!ctxPart.includes("context truncated")) throw new Error("selfcheck: second cut left no truncation marker");
+      if (partial.split("===== DIFF =====").length !== 2) throw new Error("selfcheck: DIFF marker not exactly once");
+      // Too little room for meaningful context means no context, not a fragment.
+      const { diff: noRoom } = prepareDiff("D".repeat(MAX_DIFF_CHARS - 50), testCtx, MAX_DIFF_CHARS);
+      if (noRoom.includes("===== PR CONTEXT")) throw new Error("selfcheck: shipped a context fragment with no room");
+      // A short context (never hit the 8000-char cap) dropped whole for lack of
+      // room must still be reported as truncated, or the scope lens silently
+      // loses the claim with no warning anywhere in the findings.
+      fs.writeFileSync(testCtx, "short claim");
+      const { diff: shortNoRoom, contextTruncated: shortDropped } = prepareDiff(
+        "D".repeat(MAX_DIFF_CHARS - 50),
+        testCtx,
+        MAX_DIFF_CHARS,
+      );
+      if (shortNoRoom.includes("===== PR CONTEXT")) throw new Error("selfcheck: shipped a short context fragment with no room");
+      if (!shortDropped) throw new Error("selfcheck: short context dropped for lack of room was not marked truncated");
+    } finally {
+      fs.rmSync(testDir, { recursive: true, force: true });
+    }
+
     console.log("selfcheck ok");
     return;
   }
@@ -289,14 +321,14 @@ async function main() {
     return;
   }
 
-  let diff = diffFile && fs.existsSync(diffFile) ? fs.readFileSync(diffFile, "utf8") : "";
-  if (!diff.trim()) {
+  const diffRaw = diffFile && fs.existsSync(diffFile) ? fs.readFileSync(diffFile, "utf8") : "";
+  const { diff, diffTruncated, contextTruncated } = prepareDiff(diffRaw, process.env.PR_CONTEXT_FILE, MAX_DIFF_CHARS);
+
+  if (!diff) {
     write("# 🧑‍⚖️ LLM Council findings\n\n_Council skipped: empty diff._\n");
     console.log("Empty diff — council skipped.");
     return;
   }
-  const truncated = diff.length > MAX_DIFF_CHARS;
-  if (truncated) diff = diff.slice(0, MAX_DIFF_CHARS);
 
   console.log(`Council: ${models.map((m) => `${m.name} [${m.provider}]`).join(", ")}`);
   const councilStartedAt = Date.now();
@@ -309,7 +341,7 @@ async function main() {
     `Council wall time: ${((Date.now() - councilStartedAt) / 1000).toFixed(1)}s (timeout ${REQUEST_TIMEOUT_MS / 1000}s)`,
   );
 
-  write(buildFindingsMarkdown(results, { truncated }));
+  write(buildFindingsMarkdown(results, { diffTruncated, contextTruncated }));
   console.log(`Wrote ${outFile}`);
 }
 

@@ -10,6 +10,15 @@ never fork its provider/lens logic into the surfaces.
 - `scripts/council-review.mjs` — fans a diff out to council models (OpenAI-compatible
   `/chat/completions` per provider), one lens each, writes `council-findings.md`.
   Every failure is non-fatal; the script always exits 0. Has `--selfcheck`.
+- `scripts/council-config.mjs` — the provider table, the lens descriptions, the
+  default members, and the OpenRouter reroute map. Data only.
+- `scripts/pr-context.mjs` — assembles the author's claim and the diff into one
+  prompt, and decides what gets cut when they do not both fit.
+
+  The two modules above are a SPLIT, not the fork the rule below forbids: each
+  thing is defined exactly once and the engine imports it. They exist because
+  `max-lines` caps a file at 300 and the budget is not negotiable. Add a member
+  or a lens in `council-config.mjs`; add nothing to a surface.
 - `action.yml` — shallow checkout → council fan-out (started in the background,
   collected just before the chair, so setup runs inside its latency) →
   `anthropics/claude-code-action@v1` (the chair: verifies, fixes, pushes, posts
@@ -24,6 +33,7 @@ never fork its provider/lens logic into the surfaces.
 - Providers: `openai`, `gemini`, `moonshot`, `openrouter`. Add one by extending
   `PROVIDERS` + `DEFAULT_MODELS` in the engine only.
 - A member with no API key must skip with a note, never throw.
+- The council uses a scope lens to verify atomicity and claim alignment. Set `PR_CONTEXT_FILE` to a file containing the author's claim (title, body, closed issues) to feed this lens.
 - A composite action's `inputs:` block must contain NO `${{ }}` expressions — not in a default AND not in a description string; GitHub parses them and fails at 'Set up job'. Callers pass github_token explicitly.
 - Secrets never land in git. CI secrets live in repo settings; local keys in env.
 - After any engine change, run `node scripts/council-review.mjs --selfcheck`.
