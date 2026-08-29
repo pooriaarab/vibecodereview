@@ -302,13 +302,7 @@ runs:
         4. Add your own lenses. Assume the author is competent; flag only diff-introduced
            defects with a concrete failure trigger.
            - conventions and test coverage.
-           - proof (required in this repo: __REQUIREPROOF__). The body's `## How I verified`
-             must carry evidence that matches the diff. Flag it when a UI change shows no
-             before/after screenshot, when an embedded screenshot shows a screen this diff does
-             not touch, when a named command has no result, when the evidence predates the
-             newest commit that changed what it shows, or when a `Proof: n/a` reason does not
-             hold. Name the capture that would settle it. Never push a proof fix: evidence is
-             the author's to produce, and a chair that invents it defeats the check.
+           __PROOFLENS__
         5. If "Can push fixes" is true and you find clear, confirmed bugs/security/convention
            issues, fix them (Edit/Write), then:
            `git add -A && git commit -m "fix: <what>" && git push origin __BRANCH__`
@@ -353,7 +347,21 @@ runs:
         PROMPT="${PROMPT//__BRANCH__/$VCR_BRANCH}"
         PROMPT="${PROMPT//__CANPUSH__/$VCR_CANPUSH}"
         PROMPT="${PROMPT//__CYCLES__/$VCR_CYCLES}"
-        PROMPT="${PROMPT//__REQUIREPROOF__/${VCR_REQUIRE_PROOF:-true}}"
+        # Mirror council-config.mjs: when proof is off, drop the whole bullet
+        # rather than interpolate the flag into a still-mandatory instruction
+        # the chair could follow regardless of what the flag says.
+        if [ "${VCR_REQUIRE_PROOF:-true}" = "false" ]; then
+          PROOF_LENS="- proof: disabled for this repo (require_proof: false). Do not ask for screenshots or command results."
+        else
+          PROOF_LENS="- proof (required in this repo: true). The body's \`## How I verified\`
+             must carry evidence that matches the diff. Flag it when a UI change shows no
+             before/after screenshot, when an embedded screenshot shows a screen this diff does
+             not touch, when a named command has no result, when the evidence predates the
+             newest commit that changed what it shows, or when a \`Proof: n/a\` reason does not
+             hold. Name the capture that would settle it. Never push a proof fix: evidence is
+             the author's to produce, and a chair that invents it defeats the check."
+        fi
+        PROMPT="${PROMPT//__PROOFLENS__/$PROOF_LENS}"
         # An empty prompt is the one failure this step can produce, and it fails
         # SILENTLY downstream: claude-code-action skips and reports success, so
         # the PR gets a green review check with no review behind it. Fail here
