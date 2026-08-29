@@ -241,6 +241,12 @@ function prepareDiff(diffText, ctxFile) {
       let rawCtx = fs.readFileSync(ctxFile, "utf8").trim();
       if (rawCtx) {
         if (rawCtx.length > 8000) rawCtx = rawCtx.slice(0, 8000) + "\n... (context truncated)";
+        // The title and body are author-controlled text going verbatim into the
+        // prompt, so instruction injection is possible in principle. Three things
+        // bound it: the action only runs on the repo owner's own PRs, the system
+        // prompt tells every member to treat this as a claim rather than ground
+        // truth, and the council's output is advisory. The chair verifies each
+        // finding against the code before acting on it. Accepted residual risk.
         ctxText = `===== PR CONTEXT (title, body, linked issue) =====\n${rawCtx}\n===== DIFF =====\n`;
       }
     } catch {
@@ -249,13 +255,16 @@ function prepareDiff(diffText, ctxFile) {
     }
   }
 
-  const combinedLength = ctxText.length + diffText.length;
-  const truncated = combinedLength > MAX_DIFF_CHARS;
-  let finalDiff = diffText;
+  // The diff is the evidence; the context is only the author's claim about it.
+  // So when the two do not both fit, the context yields first, all the way to
+  // nothing. Spending diff tail on boilerplate would degrade every lens in
+  // order to help one.
+  const truncated = ctxText.length + diffText.length > MAX_DIFF_CHARS;
   if (truncated) {
-    const diffBudget = MAX_DIFF_CHARS - ctxText.length;
-    finalDiff = diffText.slice(0, Math.max(0, diffBudget));
+    const room = Math.max(0, MAX_DIFF_CHARS - diffText.length);
+    ctxText = ctxText.slice(0, room);
   }
+  const finalDiff = diffText.slice(0, MAX_DIFF_CHARS - ctxText.length);
   return { diff: ctxText + finalDiff, truncated };
 }
 
@@ -319,7 +328,11 @@ async function main() {
       const bigDiff = "D".repeat(MAX_DIFF_CHARS);
       const { diff: truncCombined, truncated } = prepareDiff(bigDiff, testCtx);
       if (!truncated || truncCombined.length > MAX_DIFF_CHARS) throw new Error("selfcheck: combined truncation failed");
-      if (!truncCombined.startsWith("===== PR CONTEXT")) throw new Error("selfcheck: context was truncated instead of diff");
+      // A diff that already fills the budget must keep every character of it.
+      if (truncCombined !== bigDiff) throw new Error("selfcheck: diff was truncated to make room for context");
+      const { diff: partial } = prepareDiff("D".repeat(MAX_DIFF_CHARS - 4000), testCtx);
+      if (!partial.startsWith("===== PR CONTEXT")) throw new Error("selfcheck: context dropped when it still fit");
+      if (partial.length > MAX_DIFF_CHARS) throw new Error("selfcheck: partial context exceeded the cap");
     } finally {
       fs.unlinkSync(testCtx);
     }
