@@ -24,6 +24,7 @@
 // Optional full override: COUNCIL_MODELS = CSV of "provider|model|Name|lens".
 
 import fs from "node:fs";
+import { prepareDiff } from "./pr-context.mjs";
 import os from "node:os";
 import path from "node:path";
 
@@ -234,60 +235,6 @@ function buildFindingsMarkdown(results, { truncated } = {}) {
   return lines.join("\n");
 }
 
-function prepareDiff(diffText, ctxFile) {
-  if (!diffText.trim()) return { diff: "", truncated: false };
-
-  const CTX_CUT = "\n... (context truncated)";
-  const HEAD = "===== PR CONTEXT (title, body, linked issue) =====\n";
-  const FOOT = "\n===== DIFF =====\n";
-  const FRAME = HEAD.length + FOOT.length;
-
-  let rawCtx = "";
-  if (ctxFile && fs.existsSync(ctxFile)) {
-    try {
-      // The title and body are author-controlled text going verbatim into the
-      // prompt, so instruction injection is possible in principle. Three things
-      // bound it: the action only runs on the repo owner's own PRs, the system
-      // prompt tells every member to treat this as a claim rather than ground
-      // truth, and the council's output is advisory. The chair verifies each
-      // finding against the code before acting on it. Accepted residual risk.
-      rawCtx = fs.readFileSync(ctxFile, "utf8").trim();
-      if (rawCtx.length > 8000) rawCtx = rawCtx.slice(0, 8000) + CTX_CUT;
-    } catch {
-      // An unreadable context file is a no-op, never an error. Same discipline
-      // as a missing API key: the council degrades, it does not fail the PR.
-      rawCtx = "";
-    }
-  }
-
-  // The diff is the evidence; the context is only the author's claim about it.
-  // So when the two do not both fit, the context yields first, all the way to
-  // nothing. Spending diff tail on boilerplate would degrade every lens in
-  // order to help one.
-  //
-  // Only rawCtx is ever cut. The two markers are what keep claim and evidence
-  // apart, so slicing the assembled string instead could clip the closing
-  // marker and run author-supplied text straight into a diff hunk with nothing
-  // between them, which is precisely the confusion the markers exist to stop.
-  const truncated = (rawCtx ? rawCtx.length + FRAME : 0) + diffText.length > MAX_DIFF_CHARS;
-  let ctxText = "";
-  if (rawCtx) {
-    const room = MAX_DIFF_CHARS - diffText.length - FRAME;
-    // Keep the context when it fits whole, however little room is left. The
-    // 200 floor exists only to avoid shipping a truncated fragment, so applying
-    // it to a short claim that would have fitted dropped context for no reason.
-    if (rawCtx.length <= room || room >= 200) {
-      let ctx = rawCtx;
-      // Mark this cut too. An unmarked truncation hands the scope lens half a
-      // claim and lets it read that as the whole claim, so it can report a
-      // mismatch between the diff and a sentence that simply stopped early.
-      if (ctx.length > room) ctx = ctx.slice(0, Math.max(0, room - CTX_CUT.length)) + CTX_CUT;
-      ctxText = HEAD + ctx + FOOT;
-    }
-  }
-  const finalDiff = diffText.slice(0, MAX_DIFF_CHARS - ctxText.length);
-  return { diff: ctxText + finalDiff, truncated };
-}
 
 async function main() {
   if (process.argv.includes("--selfcheck")) {
@@ -339,25 +286,25 @@ async function main() {
     const testCtx = path.join(testDir, "ctx.txt");
     fs.writeFileSync(testCtx, "my PR claim");
     try {
-      const { diff } = prepareDiff("my diff", testCtx);
+      const { diff } = prepareDiff("my diff", testCtx, MAX_DIFF_CHARS);
       if (!diff.includes("my PR claim") || !diff.includes("my diff")) throw new Error("selfcheck: context not prepended");
     } finally {
       fs.rmSync(testDir, { recursive: true, force: true });
     }
-    const { diff: noCtxDiff } = prepareDiff("my diff", path.join(testDir, "nonexistent.tmp"));
+    const { diff: noCtxDiff } = prepareDiff("my diff", path.join(testDir, "nonexistent.tmp"), MAX_DIFF_CHARS);
     if (noCtxDiff !== "my diff") throw new Error("selfcheck: missing context file is not a no-op");
 
     fs.mkdirSync(testDir, { recursive: true });
     fs.writeFileSync(testCtx, "A".repeat(10000));
     try {
-      const { diff: truncCtx } = prepareDiff("my diff", testCtx);
+      const { diff: truncCtx } = prepareDiff("my diff", testCtx, MAX_DIFF_CHARS);
       if (!truncCtx.includes("context truncated") || truncCtx.length > 9000) throw new Error("selfcheck: context not truncated at 8000");
       const bigDiff = "D".repeat(MAX_DIFF_CHARS);
-      const { diff: truncCombined, truncated } = prepareDiff(bigDiff, testCtx);
+      const { diff: truncCombined, truncated } = prepareDiff(bigDiff, testCtx, MAX_DIFF_CHARS);
       if (!truncated || truncCombined.length > MAX_DIFF_CHARS) throw new Error("selfcheck: combined truncation failed");
       // A diff that already fills the budget must keep every character of it.
       if (truncCombined !== bigDiff) throw new Error("selfcheck: diff was truncated to make room for context");
-      const { diff: partial } = prepareDiff("D".repeat(MAX_DIFF_CHARS - 4000), testCtx);
+      const { diff: partial } = prepareDiff("D".repeat(MAX_DIFF_CHARS - 4000), testCtx, MAX_DIFF_CHARS);
       if (!partial.startsWith("===== PR CONTEXT")) throw new Error("selfcheck: context dropped when it still fit");
       if (partial.length > MAX_DIFF_CHARS) throw new Error("selfcheck: partial context exceeded the cap");
       // A truncated context must still be closed by the DIFF marker, or author
@@ -368,7 +315,7 @@ async function main() {
       if (!ctxPart.includes("context truncated")) throw new Error("selfcheck: second cut left no truncation marker");
       if (partial.split("===== DIFF =====").length !== 2) throw new Error("selfcheck: DIFF marker not exactly once");
       // Too little room for meaningful context means no context, not a fragment.
-      const { diff: noRoom } = prepareDiff("D".repeat(MAX_DIFF_CHARS - 50), testCtx);
+      const { diff: noRoom } = prepareDiff("D".repeat(MAX_DIFF_CHARS - 50), testCtx, MAX_DIFF_CHARS);
       if (noRoom.includes("===== PR CONTEXT")) throw new Error("selfcheck: shipped a context fragment with no room");
     } finally {
       fs.rmSync(testDir, { recursive: true, force: true });
@@ -403,7 +350,7 @@ async function main() {
   }
 
   const diffRaw = diffFile && fs.existsSync(diffFile) ? fs.readFileSync(diffFile, "utf8") : "";
-  const { diff, truncated } = prepareDiff(diffRaw, process.env.PR_CONTEXT_FILE);
+  const { diff, truncated } = prepareDiff(diffRaw, process.env.PR_CONTEXT_FILE, MAX_DIFF_CHARS);
 
   if (!diff) {
     write("# 🧑‍⚖️ LLM Council findings\n\n_Council skipped: empty diff._\n");
