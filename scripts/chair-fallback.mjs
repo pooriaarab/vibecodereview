@@ -93,11 +93,14 @@ const VALID_ESCAPE = new Set(['"', "\\", "/", "b", "f", "n", "r", "t", "u"]);
 const CONTROL_ESCAPE = { "\n": "\\n", "\r": "\\r", "\t": "\\t", "\b": "\\b", "\f": "\\f" };
 const HEX4 = /^[0-9a-fA-F]{4}/;
 // A backslash right before a quote is a genuine `\"` escape only if the string
-// keeps going afterward. If what follows (past whitespace) is a structural
-// JSON character, that quote is the real closing quote and the backslash is a
-// stray one — e.g. a Windows path ending in `\` — so treating it as `\"`
-// would swallow the closing quote and run the string past the object's end.
-const STRUCTURAL_AFTER_STRING = /^\s*[,:}\]]/;
+// keeps going afterward. If what follows is unambiguously the START of the
+// NEXT token — end of container (`}`/`]`), a bare `:` (this string was a key),
+// or `,` followed by another quoted key and `:` — that quote is the real
+// closing quote and the backslash is a stray one, e.g. a Windows path ending
+// in `\`. A bare `,` is NOT enough on its own: prose routinely quotes a word
+// and continues with a comma ("say \"hi\", and ..."), which is a `\"` mid-string,
+// not a closing quote, even though a comma follows it too.
+const STRUCTURAL_AFTER_STRING = /^\s*(?:[}\]]|:|,\s*"[^"\\]*"\s*:)/;
 
 function repairJsonStrings(text) {
   let out = "";
@@ -147,8 +150,8 @@ function parseVerdict(text) {
   } catch (err) {
     try {
       return JSON.parse(repairJsonStrings(candidate));
-    } catch {
-      throw new Error(`chair reply is not JSON even after repair: ${err.message}`);
+    } catch (repairErr) {
+      throw new Error(`chair reply is not JSON even after repair: ${err.message} (repair attempt: ${repairErr.message})`);
     }
   }
 }
@@ -256,6 +259,19 @@ function selfcheck() {
   const trailingBackslash = parseVerdict(String.raw`{"verdict":"comment","summary":"C:\path\","findings":[]}`);
   if (trailingBackslash.summary !== "C:\\path\\") {
     throw new Error("selfcheck: trailing backslash before closing quote not repaired: " + JSON.stringify(trailingBackslash.summary));
+  }
+
+  // A genuine `\"` mid-sentence (a quoted word) followed by a comma must NOT
+  // be mistaken for the real closing quote just because a comma follows it —
+  // prose does this constantly ("say \"hi\", and ..."). Combined with an
+  // unrelated invalid escape elsewhere (forcing the repair path to run at
+  // all), this used to truncate the string at the quoted word and fail the
+  // whole reply.
+  const quoteThenComma = parseVerdict(
+    String.raw`{"verdict":"comment","summary":"say \"hi\", and \_bold\_ done","findings":[]}`
+  );
+  if (quoteThenComma.summary !== 'say "hi", and \\_bold\\_ done') {
+    throw new Error("selfcheck: quoted phrase before comma misread as closing quote: " + JSON.stringify(quoteThenComma.summary));
   }
 
   // Repair is not a licence to accept anything: a truncated object still fails.
