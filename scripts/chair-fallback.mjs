@@ -84,13 +84,76 @@ async function askChair(diff, council, diffTruncated) {
   }
 }
 
+// A model writing markdown inside a JSON string breaks that string two ways:
+// an escape JSON does not define (`\_`, `\*`, a lone backslash copied out of a
+// diff or a regex) and a raw newline or tab. Both are recoverable, and losing
+// an entire review to one stray backslash is exactly what a fallback exists to
+// prevent. Repairs only what is invalid; a well-formed reply is unchanged.
+const VALID_ESCAPE = new Set(['"', "\\", "/", "b", "f", "n", "r", "t", "u"]);
+const CONTROL_ESCAPE = { "\n": "\\n", "\r": "\\r", "\t": "\\t", "\b": "\\b", "\f": "\\f" };
+const HEX4 = /^[0-9a-fA-F]{4}/;
+// A backslash right before a quote is a genuine `\"` escape only if the string
+// keeps going afterward. If what follows is unambiguously the START of the
+// NEXT token — end of container (`}`/`]`), a bare `:` (this string was a key),
+// or `,` followed by another quoted key and `:` — that quote is the real
+// closing quote and the backslash is a stray one, e.g. a Windows path ending
+// in `\`. A bare `,` is NOT enough on its own: prose routinely quotes a word
+// and continues with a comma ("say \"hi\", and ..."), which is a `\"` mid-string,
+// not a closing quote, even though a comma follows it too.
+const STRUCTURAL_AFTER_STRING = /^\s*(?:[}\]]|:|,\s*"[^"\\]*"\s*:)/;
+
+function repairJsonStrings(text) {
+  let out = "";
+  let inString = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (!inString) {
+      inString = ch === '"';
+      out += ch;
+    } else if (ch === '"') {
+      inString = false;
+      out += ch;
+    } else if (ch === "\\") {
+      const next = text[i + 1];
+      if (next === undefined) out += "\\\\";
+      else if (next === '"' && STRUCTURAL_AFTER_STRING.test(text.slice(i + 2))) {
+        out += "\\\\";
+      } else if (next === "u" && !HEX4.test(text.slice(i + 2, i + 6))) {
+        // `\u` is only a valid escape when 4 hex digits follow; otherwise it's
+        // a path like `C:\users`, and only the backslash is invalid.
+        out += "\\\\";
+      } else if (VALID_ESCAPE.has(next)) {
+        out += ch + next;
+        i++;
+      } else {
+        // Only escape the backslash; leave `next` for the next iteration so a
+        // control character right after an invalid escape still gets escaped
+        // instead of being copied into the string raw.
+        out += "\\\\";
+      }
+    } else if (ch < " ") {
+      out += CONTROL_ESCAPE[ch] || `\\u${ch.charCodeAt(0).toString(16).padStart(4, "0")}`;
+    } else out += ch;
+  }
+  return out;
+}
+
 // A model told to emit JSON still sometimes wraps it in a fence or prose. Take
 // the outermost braces rather than failing the whole review on formatting.
 function parseVerdict(text) {
   const start = text.indexOf("{");
   const end = text.lastIndexOf("}");
   if (start === -1 || end <= start) throw new Error(`no JSON object in chair reply: ${truncate(text, 200)}`);
-  return JSON.parse(text.slice(start, end + 1));
+  const candidate = text.slice(start, end + 1);
+  try {
+    return JSON.parse(candidate);
+  } catch (err) {
+    try {
+      return JSON.parse(repairJsonStrings(candidate));
+    } catch (repairErr) {
+      throw new Error(`chair reply is not JSON even after repair: ${err.message} (repair attempt: ${repairErr.message})`);
+    }
+  }
 }
 
 // One normalization, used by both the rendered body and the verdict. Two
@@ -158,7 +221,73 @@ function renderBody(parsed, findings, { diffTruncated } = {}) {
   return lines.join("\n");
 }
 
+// Offline shape check, no network: node chair-fallback.mjs --selfcheck
+function selfcheck() {
+  // The reply that lost a whole review on PR #27: markdown underscores escaped
+  // the markdown way, which JSON does not define.
+  const escaped = parseVerdict(String.raw`{"verdict":"comment","summary":"see \_foo\_ and C:\path","findings":[]}`);
+  if (!escaped.summary.includes("foo")) throw new Error("selfcheck: invalid escape not repaired");
+
+  // A raw newline inside a string is the other way a markdown-writing model
+  // breaks its own JSON.
+  const raw = parseVerdict('{"verdict":"comment","summary":"line one\nline two","findings":[]}');
+  if (!raw.summary.includes("line two")) throw new Error("selfcheck: raw control character not repaired");
+
+  // Well-formed JSON must survive untouched — the repair is a fallback, not a
+  // rewrite. \n stays a newline; it must not become a literal backslash-n.
+  const clean = parseVerdict('{"verdict":"approve","summary":"a\\nb","findings":[]}');
+  if (clean.summary !== "a\nb") throw new Error("selfcheck: valid escape was mangled: " + JSON.stringify(clean.summary));
+
+  // A raw control character right after an invalid escape (e.g. a stray
+  // backslash at the end of a copied line, immediately followed by the
+  // newline that ends it) must still get escaped, not copied through raw.
+  const backslashNewline = parseVerdict('{"verdict":"comment","summary":"end \\\nnext","findings":[]}');
+  if (!backslashNewline.summary.includes("next")) {
+    throw new Error("selfcheck: control char after invalid escape not repaired");
+  }
+
+  // A path like `C:\users` has `\u` followed by non-hex characters — not a
+  // valid unicode escape. Only the backslash should be escaped; `u` and the
+  // rest of the path must survive untouched.
+  const badUnicode = parseVerdict(String.raw`{"verdict":"comment","summary":"see C:\users\config","findings":[]}`);
+  if (!badUnicode.summary.includes("C:\\users\\config")) {
+    throw new Error("selfcheck: invalid \\u escape not repaired: " + JSON.stringify(badUnicode.summary));
+  }
+
+  // A value ending in a lone backslash right before the real closing quote
+  // (e.g. a Windows path) must not have that quote swallowed as `\"`.
+  const trailingBackslash = parseVerdict(String.raw`{"verdict":"comment","summary":"C:\path\","findings":[]}`);
+  if (trailingBackslash.summary !== "C:\\path\\") {
+    throw new Error("selfcheck: trailing backslash before closing quote not repaired: " + JSON.stringify(trailingBackslash.summary));
+  }
+
+  // A genuine `\"` mid-sentence (a quoted word) followed by a comma must NOT
+  // be mistaken for the real closing quote just because a comma follows it —
+  // prose does this constantly ("say \"hi\", and ..."). Combined with an
+  // unrelated invalid escape elsewhere (forcing the repair path to run at
+  // all), this used to truncate the string at the quoted word and fail the
+  // whole reply.
+  const quoteThenComma = parseVerdict(
+    String.raw`{"verdict":"comment","summary":"say \"hi\", and \_bold\_ done","findings":[]}`
+  );
+  if (quoteThenComma.summary !== 'say "hi", and \\_bold\\_ done') {
+    throw new Error("selfcheck: quoted phrase before comma misread as closing quote: " + JSON.stringify(quoteThenComma.summary));
+  }
+
+  // Repair is not a licence to accept anything: a truncated object still fails.
+  let threw = false;
+  try {
+    parseVerdict('{"verdict":"comment","summary":');
+  } catch {
+    threw = true;
+  }
+  if (!threw) throw new Error("selfcheck: malformed JSON was accepted");
+
+  console.log("chair-fallback selfcheck passed");
+}
+
 async function main() {
+  if (process.argv.includes("--selfcheck")) return selfcheck();
   const [diffFile, councilFile] = process.argv.slice(2);
   const repo = process.env.GITHUB_REPOSITORY;
   const pr = process.env.PR_NUMBER;
