@@ -100,9 +100,10 @@ export function diffAddsTestLines(diff) {
 // once it applies what it proposes. It ships off so that turning it on is a
 // decision somebody made rather than a cost that arrived.
 //
-// It rides OpenRouter with its own model override for the same reason the scope
-// member does: sharing a key with another lens means one `insufficient_quota`
-// takes out both.
+// It rides OpenRouter with its own model override for the same reason SCOPE_MODEL
+// exists: so setting it cannot silently repoint another lens's model. It does NOT
+// give quota isolation -- mutation shares OPENROUTER_API_KEY with the scope and
+// maintainability members, so an exhausted key still takes out all three.
 export function mutationMember() {
   if (String(process.env.MUTATION_LENS || "").trim().toLowerCase() !== "true") return null;
   return {

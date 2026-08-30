@@ -57,7 +57,7 @@ inputs:
     required: false
     default: "false"
   mutation_model:
-    description: "Model for the mutation member, over OpenRouter. Its own override rather than sharing one with another lens, because two lenses behind one key means one quota failure takes out both. Requires openrouter_api_key."
+    description: "Model for the mutation member, over OpenRouter. Its own env var keeps it from silently repointing the scope or maintainability lens, which ride the same OpenRouter route. It still shares openrouter_api_key with those lenses, so a quota failure on that key still takes out all three."
     required: false
     default: ""
 

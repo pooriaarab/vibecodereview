@@ -87,8 +87,10 @@ Two honest limits:
   question to ask about a documentation change, and the report says so rather
   than staying silent — silence would read as "found nothing".
 
-`mutation_model` overrides the model, over OpenRouter, separately from every
-other lens so that one exhausted key cannot take out two members.
+`mutation_model` overrides the model, over OpenRouter, with its own env var so
+setting it cannot silently repoint the scope or maintainability lens (both also
+ride OpenRouter). It still shares `OPENROUTER_API_KEY` with those lenses, so an
+exhausted key takes all three out together, not just one.
 
 ### Custom / OffRouter provider
 
