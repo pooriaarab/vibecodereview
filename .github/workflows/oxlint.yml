@@ -14,3 +14,7 @@ jobs:
       - uses: oven-sh/setup-bun@v2
       - name: oxlint (agent budgets — warn-only, ratchet to error later)
         run: bunx oxlint@^1 --config .oxlintrc.json
+      # The selfchecks used to run only at publish time, so a broken parser
+      # reached every consumer before anything went red. Run them per PR.
+      - name: selfcheck
+        run: npm run selfcheck

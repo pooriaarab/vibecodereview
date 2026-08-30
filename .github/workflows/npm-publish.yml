@@ -17,7 +17,7 @@ jobs:
           node-version: "20"
           registry-url: "https://registry.npmjs.org"
       - name: Selfcheck
-        run: node scripts/council-review.mjs --selfcheck
+        run: npm run selfcheck
       - name: Publish
         run: npm publish
         env:

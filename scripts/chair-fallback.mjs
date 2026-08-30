@@ -84,13 +84,55 @@ async function askChair(diff, council, diffTruncated) {
   }
 }
 
+// A model writing markdown inside a JSON string breaks that string two ways:
+// an escape JSON does not define (`\_`, `\*`, a lone backslash copied out of a
+// diff or a regex) and a raw newline or tab. Both are recoverable, and losing
+// an entire review to one stray backslash is exactly what a fallback exists to
+// prevent. Repairs only what is invalid; a well-formed reply is unchanged.
+const VALID_ESCAPE = new Set(['"', "\\", "/", "b", "f", "n", "r", "t", "u"]);
+const CONTROL_ESCAPE = { "\n": "\\n", "\r": "\\r", "\t": "\\t", "\b": "\\b", "\f": "\\f" };
+
+function repairJsonStrings(text) {
+  let out = "";
+  let inString = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (!inString) {
+      inString = ch === '"';
+      out += ch;
+    } else if (ch === '"') {
+      inString = false;
+      out += ch;
+    } else if (ch === "\\") {
+      const next = text[i + 1];
+      if (next === undefined) out += "\\\\";
+      else {
+        out += VALID_ESCAPE.has(next) ? ch + next : "\\\\" + next;
+        i++;
+      }
+    } else if (ch < " ") {
+      out += CONTROL_ESCAPE[ch] || `\\u${ch.charCodeAt(0).toString(16).padStart(4, "0")}`;
+    } else out += ch;
+  }
+  return out;
+}
+
 // A model told to emit JSON still sometimes wraps it in a fence or prose. Take
 // the outermost braces rather than failing the whole review on formatting.
 function parseVerdict(text) {
   const start = text.indexOf("{");
   const end = text.lastIndexOf("}");
   if (start === -1 || end <= start) throw new Error(`no JSON object in chair reply: ${truncate(text, 200)}`);
-  return JSON.parse(text.slice(start, end + 1));
+  const candidate = text.slice(start, end + 1);
+  try {
+    return JSON.parse(candidate);
+  } catch (err) {
+    try {
+      return JSON.parse(repairJsonStrings(candidate));
+    } catch {
+      throw new Error(`chair reply is not JSON even after repair: ${err.message}`);
+    }
+  }
 }
 
 // One normalization, used by both the rendered body and the verdict. Two
@@ -158,7 +200,37 @@ function renderBody(parsed, findings, { diffTruncated } = {}) {
   return lines.join("\n");
 }
 
+// Offline shape check, no network: node chair-fallback.mjs --selfcheck
+function selfcheck() {
+  // The reply that lost a whole review on PR #27: markdown underscores escaped
+  // the markdown way, which JSON does not define.
+  const escaped = parseVerdict(String.raw`{"verdict":"comment","summary":"see \_foo\_ and C:\path","findings":[]}`);
+  if (!escaped.summary.includes("foo")) throw new Error("selfcheck: invalid escape not repaired");
+
+  // A raw newline inside a string is the other way a markdown-writing model
+  // breaks its own JSON.
+  const raw = parseVerdict('{"verdict":"comment","summary":"line one\nline two","findings":[]}');
+  if (!raw.summary.includes("line two")) throw new Error("selfcheck: raw control character not repaired");
+
+  // Well-formed JSON must survive untouched — the repair is a fallback, not a
+  // rewrite. \n stays a newline; it must not become a literal backslash-n.
+  const clean = parseVerdict('{"verdict":"approve","summary":"a\\nb","findings":[]}');
+  if (clean.summary !== "a\nb") throw new Error("selfcheck: valid escape was mangled: " + JSON.stringify(clean.summary));
+
+  // Repair is not a licence to accept anything: a truncated object still fails.
+  let threw = false;
+  try {
+    parseVerdict('{"verdict":"comment","summary":');
+  } catch {
+    threw = true;
+  }
+  if (!threw) throw new Error("selfcheck: malformed JSON was accepted");
+
+  console.log("chair-fallback selfcheck passed");
+}
+
 async function main() {
+  if (process.argv.includes("--selfcheck")) return selfcheck();
   const [diffFile, councilFile] = process.argv.slice(2);
   const repo = process.env.GITHUB_REPOSITORY;
   const pr = process.env.PR_NUMBER;
