@@ -106,9 +106,14 @@ function repairJsonStrings(text) {
     } else if (ch === "\\") {
       const next = text[i + 1];
       if (next === undefined) out += "\\\\";
-      else {
-        out += VALID_ESCAPE.has(next) ? ch + next : "\\\\" + next;
+      else if (VALID_ESCAPE.has(next)) {
+        out += ch + next;
         i++;
+      } else {
+        // Only escape the backslash; leave `next` for the next iteration so a
+        // control character right after an invalid escape still gets escaped
+        // instead of being copied into the string raw.
+        out += "\\\\";
       }
     } else if (ch < " ") {
       out += CONTROL_ESCAPE[ch] || `\\u${ch.charCodeAt(0).toString(16).padStart(4, "0")}`;
@@ -216,6 +221,14 @@ function selfcheck() {
   // rewrite. \n stays a newline; it must not become a literal backslash-n.
   const clean = parseVerdict('{"verdict":"approve","summary":"a\\nb","findings":[]}');
   if (clean.summary !== "a\nb") throw new Error("selfcheck: valid escape was mangled: " + JSON.stringify(clean.summary));
+
+  // A raw control character right after an invalid escape (e.g. a stray
+  // backslash at the end of a copied line, immediately followed by the
+  // newline that ends it) must still get escaped, not copied through raw.
+  const backslashNewline = parseVerdict('{"verdict":"comment","summary":"end \\\nnext","findings":[]}');
+  if (!backslashNewline.summary.includes("next")) {
+    throw new Error("selfcheck: control char after invalid escape not repaired");
+  }
 
   // Repair is not a licence to accept anything: a truncated object still fails.
   let threw = false;
