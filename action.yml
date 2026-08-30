@@ -356,9 +356,10 @@ runs:
           PROOF_LENS="- proof (required in this repo: true). The body's \`## How I verified\`
              must carry evidence that matches the diff. Flag it when a UI change shows no
              before/after screenshot, when an embedded screenshot shows a screen this diff does
-             not touch, when a named command has no result, when the evidence predates the
-             newest commit that changed what it shows, or when a \`Proof: n/a\` reason does not
-             hold. Name the capture that would settle it. Never push a proof fix: evidence is
+             not touch, when a named command has no result, when the evidence
+             leaves untested a code path this PR changes, when the evidence predates the
+             newest commit that touched a path it exercises, or when a
+             \`Proof: n/a\` reason does not hold. Name the capture that would settle it. Never push a proof fix: evidence is
              the author's to produce, and a chair that invents it defeats the check."
         fi
         PROMPT="${PROMPT//__PROOFLENS__/$PROOF_LENS}"

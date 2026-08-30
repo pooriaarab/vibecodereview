@@ -35,7 +35,7 @@ export const LENSES = {
     // collecting findings its author can never satisfy.
     (process.env.REQUIRE_PROOF === "false"
       ? ""
-      : " ALSO judge the evidence in the body: a visible change with no before/after screenshot, an embedded screenshot of a screen this diff does not touch, a named command with no result, or a `Proof: n/a` reason that does not hold.") +
+      : " ALSO judge the evidence in the body: a visible change with no before/after screenshot, an embedded screenshot of a screen this diff does not touch, a named command with no result, evidence that leaves a code path this PR changes untested or that predates the newest commit touching a path it exercises, or a `Proof: n/a` reason that does not hold.") +
     " Do NOT report bugs, performance, security, or style (other members cover those).",
 };
 

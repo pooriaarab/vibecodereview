@@ -41,6 +41,14 @@ produces the evidence itself. Set `require_proof: false` in a repo where no chan
 ever visible. The rule the check enforces lives in `pr-standards.md` in
 [pooriaarab/scripts](https://github.com/pooriaarab/scripts).
 
+Evidence has to cover the diff it claims to cover. The check flags a body whose
+`## How I verified` leaves untested a code path the PR changes, and one whose
+capture predates the newest commit touching a path that capture exercises. It does
+not ask for a recapture on every push: a commit that changes nothing the evidence
+shows leaves that evidence good. `scripts/proof-gate.test.sh` pins both paths the
+`require_proof` flag travels — the council scope lens and the chair's own bullet —
+because the first version gated only one of them.
+
 ## Use it in a repo
 
 ```bash
