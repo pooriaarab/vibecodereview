@@ -141,7 +141,15 @@ runs:
         if command -v claude >/dev/null 2>&1 || [ -x "$HOME/.local/bin/claude" ]; then
           echo "Claude Code CLI already present; skipping install."
         else
-          curl -fsSL https://claude.ai/install.sh | bash
+          # Retry the download. Every later step -- the council fan-out, all
+          # three chair attempts, the OpenRouter fallback -- runs after this
+          # one, so a single connection reset here loses the whole review and
+          # none of those fallbacks gets a turn. --retry-all-errors is the
+          # flag that makes a reset retryable: on its own --retry covers
+          # transient HTTP statuses and timeouts, and a reset is neither.
+          curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors \
+            https://claude.ai/install.sh -o "$RUNNER_TEMP/install-claude.sh"
+          bash "$RUNNER_TEMP/install-claude.sh"
         fi
 
     - name: Fix-cycle guard
