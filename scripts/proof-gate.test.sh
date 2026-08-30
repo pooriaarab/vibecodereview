@@ -17,6 +17,17 @@ report() {
   else printf 'FAIL  %s\n' "$2"; fails=$((fails + 1)); fi
 }
 
+# Path 0: action.yml must actually wire the `require_proof` input to both env
+# vars. Paths 1 and 2 below inject REQUIRE_PROOF/VCR_REQUIRE_PROOF directly, so
+# they'd stay green even if this wiring were broken or renamed — which is
+# exactly the class of bug this whole file exists to catch.
+grep -q 'REQUIRE_PROOF: ${{ inputs.require_proof }}' "$ROOT/action.yml" \
+  && report 0 'action.yml wires require_proof input to REQUIRE_PROOF' \
+  || report 1 'action.yml wires require_proof input to REQUIRE_PROOF'
+grep -q 'VCR_REQUIRE_PROOF: ${{ inputs.require_proof }}' "$ROOT/action.yml" \
+  && report 0 'action.yml wires require_proof input to VCR_REQUIRE_PROOF' \
+  || report 1 'action.yml wires require_proof input to VCR_REQUIRE_PROOF'
+
 # Path 1: the council scope lens.
 lens() { REQUIRE_PROOF="$1" node -e 'import("./scripts/council-config.mjs").then(m => process.stdout.write(m.LENSES.scope))'; }
 ( cd "$ROOT" && lens false | grep -q 'judge the evidence' ) && report 1 'scope lens drops the proof clause when off' || report 0 'scope lens drops the proof clause when off'
