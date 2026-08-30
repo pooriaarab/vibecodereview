@@ -137,7 +137,12 @@ runs:
         set -euo pipefail
         # A failed lookup must never stop a review. Degrade to an empty list, so
         # an API blip reads as "no spend yet" rather than "out of budget".
-        RUNS=$(gh api "repos/$VCR_REPO/actions/runs?branch=$VCR_BRANCH&per_page=100" 2>/dev/null || echo '{"workflow_runs":[]}')
+        # branch is passed as a -f parameter, not interpolated into the query
+        # string: a branch name may legally contain "&" (git allows it), and a
+        # branch like "x&branch=some-empty-branch" would otherwise split the
+        # query string and silently read as under budget. -f switches gh api to
+        # POST unless --method GET is given, and this endpoint is GET-only.
+        RUNS=$(gh api "repos/$VCR_REPO/actions/runs" --method GET -f branch="$VCR_BRANCH" -f per_page=100 2>/dev/null || echo '{"workflow_runs":[]}')
         printf '%s' "$RUNS" | python3 -c '
         import json, os, sys
         # github.workflow is the display name in the workflow file, which is not
