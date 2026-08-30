@@ -46,6 +46,8 @@ import {
   CREDENTIAL_FAILURE_STATUSES,
   openRouterFallbackFor,
   DEFAULT_MODELS,
+  withMutationMember,
+  selfcheckMutationRoster,
 } from "./council-config.mjs";
 
 function parseModels() {
@@ -59,6 +61,7 @@ function parseModels() {
     })
     .filter((m) => m.provider && m.model && PROVIDERS[m.provider]);
 }
+
 
 function systemPrompt(lens) {
   const focus = LENSES[lens] || LENSES.correctness;
@@ -159,7 +162,7 @@ async function callModelWithFallback(model, diff) {
   return { ...second, model: { ...fallback, name: `${model.name} (via OpenRouter)` } };
 }
 
-function buildFindingsMarkdown(results, { diffTruncated, contextTruncated } = {}) {
+function buildFindingsMarkdown(results, { diffTruncated, contextTruncated, mutationSkipped } = {}) {
   const lines = ["# 🧑‍⚖️ LLM Council findings", ""];
   lines.push(
     "Independent per-lens reviews from council models. Treat as co-reviewer input: de-dupe, verify each claim against the code, discard false positives, and only fix confidently-real issues.",
@@ -171,6 +174,11 @@ function buildFindingsMarkdown(results, { diffTruncated, contextTruncated } = {}
     lines.push("> ⚠️ Diff was truncated for length; council saw the first portion only.", "");
   } else if (contextTruncated) {
     lines.push("> ⚠️ PR context (title, body, linked issues) was truncated for length; the diff is complete.", "");
+  }
+  // An enabled lens that produced nothing must say why. Silence here reads as
+  // "the mutation lens found nothing", which is the opposite of "it never ran".
+  if (mutationSkipped) {
+    lines.push(`> ℹ️ Mutation lens enabled but not dispatched: ${mutationSkipped}.`, "");
   }
   for (const r of results) {
     lines.push(`## ${r.model.name} — ${r.model.lens} lens`, "");
@@ -237,6 +245,7 @@ async function main() {
     // from the environment, so a repo that legitimately overrides the member list
     // would fail the selfcheck that AGENTS.md requires it to run.
     if (!DEFAULT_MODELS.some((m) => m.lens === "scope")) throw new Error("selfcheck: scope lens missing from default members");
+    selfcheckMutationRoster(buildFindingsMarkdown);
 
     // A unique temp dir, not a fixed name in the working directory: the old
     // fixture would clobber a real test_ctx.tmp and broke concurrent runs.
@@ -330,9 +339,15 @@ async function main() {
     return;
   }
 
-  console.log(`Council: ${models.map((m) => `${m.name} [${m.provider}]`).join(", ")}`);
+  // Composed here rather than beside parseModels, because whether the mutation
+  // member is worth dispatching is a fact about the diff, which does not exist
+  // until it has been read and truncated above.
+  const { members, mutationSkipped } = withMutationMember(models, diff);
+  if (mutationSkipped) console.log(`Mutation lens enabled but not dispatched: ${mutationSkipped}`);
+
+  console.log(`Council: ${members.map((m) => `${m.name} [${m.provider}]`).join(", ")}`);
   const councilStartedAt = Date.now();
-  const results = await Promise.all(models.map((m) => callModelWithFallback(m, diff)));
+  const results = await Promise.all(members.map((m) => callModelWithFallback(m, diff)));
   for (const r of results) {
     const took = r.ms === undefined ? "" : ` (${(r.ms / 1000).toFixed(1)}s)`;
     console.log(`- ${r.model.name}${took}: ${r.error ? "SKIP/ERR " + r.error : "ok"}`);
@@ -341,7 +356,7 @@ async function main() {
     `Council wall time: ${((Date.now() - councilStartedAt) / 1000).toFixed(1)}s (timeout ${REQUEST_TIMEOUT_MS / 1000}s)`,
   );
 
-  write(buildFindingsMarkdown(results, { diffTruncated, contextTruncated }));
+  write(buildFindingsMarkdown(results, { diffTruncated, contextTruncated, mutationSkipped }));
   console.log(`Wrote ${outFile}`);
 }
 

@@ -25,6 +25,8 @@ export const LENSES = {
     "security (OWASP-aligned): broken authz/authn, tenant isolation gaps, injection, SSRF, secret exposure, unsafe redirects, and missing server-side input validation",
   maintainability:
     "maintainability and data integrity: dead/duplicated code, migration and data-loss risks, wrong or missing error handling, missing input validation, and broken API contracts",
+  mutation:
+    "whether the tests in this diff can fail at all. For EACH test added or changed, name ONE concrete mutation to the NON-TEST code it covers -- a specific `path:line` and the exact replacement -- that the test must catch. Report a finding only when the test would still pass after that mutation, or when it asserts something the code cannot get wrong: the test and the code share the same helper so they agree regardless, the assertion restates the implementation, the fixture never reaches the code path, or a value is compared against itself. Also report a test that can only fail by hanging or by timing out, since in CI that is a job timeout rather than a red. Do NOT report missing coverage in general, and do NOT report bugs, performance, security or style (other members cover those)",
   scope:
     "scope and atomicity: the diff doing more than one thing (a fix plus a refactor plus a rename), changes with no connection to the stated purpose of the PR, opportunistic edits to files the stated change did not require, or a stated purpose the diff does not actually accomplish. Do NOT report bugs, performance, security, or style (other members cover those).",
 };
@@ -69,3 +71,102 @@ export const DEFAULT_MODELS = [
   // here from silently re-pointing the correctness member too.
   { provider: "openrouter", model: process.env.SCOPE_MODEL || "openai/gpt-5.6", name: "GPT-5.6 (scope)", lens: "scope" },
 ];
+
+// Test files whose ADDED lines make a mutation review worth paying for. The
+// lens has nothing to say about a diff that adds no test, so a docs-only or
+// config-only pull request should not dispatch it at all.
+const TEST_PATH = /(^|\/)(tests?|spec|__tests__)\/|[._-](test|spec)\.[a-z]+$|(^|\/)test_[^/]+$/i;
+
+// Read the `+++ b/<path>` headers, not every `+` line: a hunk body line that
+// happens to start with "+" is content, not a filename, and matching those
+// would enable the lens on any diff that adds a line beginning with a plus.
+export function diffAddsTestLines(diff) {
+  let inTestFile = false;
+  for (const line of String(diff || "").split("\n")) {
+    if (line.startsWith("+++ ")) {
+      const path = line.slice(4).replace(/^b\//, "").trim();
+      inTestFile = path !== "/dev/null" && TEST_PATH.test(path);
+      continue;
+    }
+    if (line.startsWith("--- ") || line.startsWith("diff --git ")) continue;
+    // A "+++" header is caught above, so any remaining "+" line is content.
+    if (inTestFile && line.startsWith("+")) return true;
+  }
+  return false;
+}
+
+// Opt-in, and never a default member. Naming the mutation is cheap; running it
+// is not, and this lens is the front half of something that will get expensive
+// once it applies what it proposes. It ships off so that turning it on is a
+// decision somebody made rather than a cost that arrived.
+//
+// It rides OpenRouter with its own model override for the same reason the scope
+// member does: sharing a key with another lens means one `insufficient_quota`
+// takes out both.
+export function mutationMember() {
+  if (String(process.env.MUTATION_LENS || "").trim().toLowerCase() !== "true") return null;
+  return {
+    provider: "openrouter",
+    model: process.env.MUTATION_MODEL || "anthropic/claude-sonnet-5",
+    name: "Claude Sonnet 5 (mutation)",
+    lens: "mutation",
+  };
+}
+
+// The mutation member is appended rather than listed in DEFAULT_MODELS, and it
+// is appended even when COUNCIL_MODELS overrides the roster. Setting
+// mutation_lens is an explicit request, so honouring it under an override is
+// the reading that matches what the caller asked for.
+//
+// It is dropped on a diff that adds no test lines. The lens asks whether the
+// tests here could fail; with no test added there is no question to ask, and
+// dispatching it anyway is spend that can only return "No findings".
+export function withMutationMember(models, diff) {
+  const mutation = mutationMember();
+  if (!mutation) return { members: models, mutationSkipped: null };
+  if (!diffAddsTestLines(diff)) return { members: models, mutationSkipped: "the diff adds no test lines" };
+  return { members: [...models, mutation], mutationSkipped: null };
+}
+
+// The roster's own offline checks live beside the roster, for the same reason
+// the roster does: keeping them in the engine pushes it past its line budget.
+// buildFindingsMarkdown is passed in rather than imported, because the engine
+// owns the report and importing it back here would make the two files circular.
+export function selfcheckMutationRoster(buildFindingsMarkdown) {
+  // The mutation lens must be OFF unless asked for. It is the front half of
+  // something that gets expensive once it runs what it proposes, so a default
+  // roster that quietly included it would be a cost nobody chose.
+  if (DEFAULT_MODELS.some((m) => m.lens === "mutation")) throw new Error("selfcheck: mutation lens is a default member");
+  const testDiff = "diff --git a/tests/t.py b/tests/t.py\n+++ b/tests/t.py\n+assert f() == 1\n";
+  const codeDiff = "diff --git a/src/a.ts b/src/a.ts\n+++ b/src/a.ts\n+const x = 1;\n";
+  if (diffAddsTestLines(codeDiff)) throw new Error("selfcheck: a code-only diff counted as adding tests");
+  if (!diffAddsTestLines(testDiff)) throw new Error("selfcheck: a test diff did not count as adding tests");
+  // A test file that is only DELETED from adds nothing to review.
+  if (diffAddsTestLines("+++ b/tests/t.py\n-assert f() == 1\n")) throw new Error("selfcheck: a deletion counted as adding tests");
+  // The header itself starts with "+", so a naive scan of "+" lines would
+  // report every diff as touching tests the moment one test file appears.
+  if (diffAddsTestLines("+++ b/tests/t.py\n")) throw new Error("selfcheck: the +++ header counted as an added line");
+  // ...and the flag has to reset at the next file, or one test file makes
+  // every later hunk in the diff look like a test.
+  if (diffAddsTestLines("+++ b/tests/t.py\n context\n+++ b/src/a.ts\n+const x = 1;\n")) {
+    throw new Error("selfcheck: test-file flag leaked into the next file");
+  }
+  const savedLens = process.env.MUTATION_LENS;
+  try {
+    delete process.env.MUTATION_LENS;
+    if (withMutationMember([], testDiff).members.length !== 0) throw new Error("selfcheck: mutation member added while disabled");
+    process.env.MUTATION_LENS = "true";
+    const on = withMutationMember([], testDiff);
+    if (on.members.length !== 1 || on.members[0].lens !== "mutation") throw new Error("selfcheck: mutation member not added when enabled");
+    const skipped = withMutationMember([], codeDiff);
+    if (skipped.members.length !== 0) throw new Error("selfcheck: mutation member dispatched on a diff with no tests");
+    if (!skipped.mutationSkipped) throw new Error("selfcheck: skipped mutation member reported no reason");
+    // The reason has to reach the report. Silence reads as "found nothing",
+    // which is the opposite of "never ran".
+    const mdSkip = buildFindingsMarkdown([], { mutationSkipped: skipped.mutationSkipped });
+    if (!mdSkip.includes("Mutation lens enabled but not dispatched")) throw new Error("selfcheck: skip reason missing from the report");
+  } finally {
+    if (savedLens === undefined) delete process.env.MUTATION_LENS;
+    else process.env.MUTATION_LENS = savedLens;
+  }
+}

@@ -29,6 +29,7 @@ verdict, self-healing fix.
 | Kimi | api.moonshot.ai | `MOONSHOT_API_KEY` | security |
 | Grok / DeepSeek | openrouter.ai | `OPENROUTER_API_KEY` | maintainability, data integrity |
 | GPT-5.6 (scope) | openrouter.ai | `OPENROUTER_API_KEY` | scope and atomicity |
+| Sonnet (mutation) | openrouter.ai | `OPENROUTER_API_KEY` | can these tests fail at all — **off by default** |
 
 A member with no key drops out. No key at all → the council step is skipped, and
 Claude still reviews alone. Nothing here blocks the PR on a provider outage. The scope lens reads the PR's title, body, and linked issues from `PR_CONTEXT_FILE` when available to verify the diff matches the author's claim.
@@ -58,6 +59,36 @@ Or wire the action directly:
 
 Swap models without code: `council_models` input, or the `*_MODEL` env
 overrides (`OPENROUTER_MODEL=deepseek/deepseek-v4-flash`, etc.).
+
+### The mutation lens
+
+```yaml
+    mutation_lens: "true"
+```
+
+Five lenses read the diff. This sixth one reads the **tests** and asks the
+question that a green suite cannot answer: would any of these fail if the code
+under them were broken?
+
+For each test added or changed it names one concrete mutation to the code that
+test covers — a `path:line` and the exact replacement — and reports a finding
+when the test would survive it. It also reports the shapes that pass no matter
+what: a test and its code sharing the same helper so they agree regardless, an
+assertion that restates the implementation, a fixture that never reaches the
+path, a value compared against itself, and a test that can only fail by hanging
+(in CI that is a job timeout, not a red).
+
+Two honest limits:
+
+- **It proposes; it does not run.** A finding is a claim you can check in one
+  command, not a measured result. Applying the mutations needs a per-repo test
+  command and a sandbox, and that is a separate feature with a separate cost.
+- **Off by default, and skipped on a diff that adds no test lines.** There is no
+  question to ask about a documentation change, and the report says so rather
+  than staying silent — silence would read as "found nothing".
+
+`mutation_model` overrides the model, over OpenRouter, separately from every
+other lens so that one exhausted key cannot take out two members.
 
 ### Custom / OffRouter provider
 
