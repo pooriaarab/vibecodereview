@@ -48,6 +48,14 @@ inputs:
     description: "Commits to fetch. The review only ever needs the diff (fetched from the API) plus enough history for the fix-cycle guard, so a full clone is wasted I/O on a large repo. Must exceed max_fix_cycles + 3. Set to 0 for a full clone."
     required: false
     default: "50"
+  max_council_runs:
+    description: "Stop after this many completed runs of this workflow on one pull request. A PR on its sixth review is not converging, and a seventh costs the same as the first. Set 0 to disable."
+    required: false
+    default: "6"
+  max_branch_runs:
+    description: "Stop after every workflow in the repo has, together, run this many times on the pull request's branch. Each fix commit re-runs them all, so this is the number that actually tracks spend. Set 0 to disable."
+    required: false
+    default: "60"
   council_timeout_ms:
     description: "Per-member deadline for the council fan-out. Members run in parallel, so this is the council's worst-case wall time. Omit for the 90s default."
     required: false
@@ -106,11 +114,60 @@ runs:
         # Same semantics as before: a failure to fetch context is a no-op,
         # never an error, and the council still runs.
 
+    # max_fix_cycles caps how often the chair pushes a fix. It caps nothing
+    # else, and a fix commit is a `synchronize` event that re-runs every
+    # workflow in the repo. So one pull request that will not converge quietly
+    # spends more machine time than ten that do, and no ceiling notices.
+    #
+    # Both ceilings come out of one API call on purpose. Real billable minutes
+    # need a request per run, which turns a guard against waste into a source of
+    # it. Run counts are the cheap proxy: every run of a workflow costs about
+    # what the last one did.
+    - name: Budget guard
+      id: budget
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github_token }}
+        VCR_REPO: ${{ github.repository }}
+        VCR_BRANCH: ${{ github.event.pull_request.head.ref }}
+        VCR_WORKFLOW: ${{ github.workflow }}
+        VCR_MAX_COUNCIL: ${{ inputs.max_council_runs }}
+        VCR_MAX_BRANCH: ${{ inputs.max_branch_runs }}
+      run: |
+        set -euo pipefail
+        # A failed lookup must never stop a review. Degrade to an empty list, so
+        # an API blip reads as "no spend yet" rather than "out of budget".
+        RUNS=$(gh api "repos/$VCR_REPO/actions/runs?branch=$VCR_BRANCH&per_page=100" 2>/dev/null || echo '{"workflow_runs":[]}')
+        printf '%s' "$RUNS" | python3 -c '
+        import json, os, sys
+        runs = [r for r in (json.load(sys.stdin).get("workflow_runs") or [])
+                if r.get("head_branch") == os.environ["VCR_BRANCH"]]
+        council = sum(1 for r in runs
+                      if r.get("name") == os.environ["VCR_WORKFLOW"]
+                      and r.get("status") == "completed")
+        max_council = int(os.environ["VCR_MAX_COUNCIL"] or 0)
+        max_branch = int(os.environ["VCR_MAX_BRANCH"] or 0)
+        over = ""
+        if max_council and council >= max_council:
+            over = f"this review has already run {council} times on the pull request, and the ceiling is {max_council}"
+        elif max_branch and len(runs) >= max_branch:
+            over = f"the workflows in this repo have run {len(runs)} times on the branch, and the ceiling is {max_branch}"
+        with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+            out.write(f"over={str(bool(over)).lower()}\n")
+            out.write(f"council_runs={council}\n")
+            out.write(f"branch_runs={len(runs)}\n")
+            out.write(f"reason={over}\n")
+        print(f"council runs: {council}/{max_council}   branch runs: {len(runs)}/{max_branch}")
+        if over:
+            print("Over budget: " + over)
+        '
+
     # The council is network-bound and the setup below is not, so start the
     # fan-out here and collect it just before the chair. Everything between the
     # two steps — the CLI install, the fix-cycle guard, the prompt build — now
     # runs inside the council's own latency instead of after it.
     - name: Council fan-out (start)
+      if: steps.budget.outputs.over != 'true'
       shell: bash
       continue-on-error: true
       env:
@@ -354,7 +411,7 @@ runs:
     # token is dead, so order them best-credit-first.
     - name: Chair review (primary token)
       id: chair_primary
-      if: steps.chair_probe.outputs.token_1 != 'dead'
+      if: steps.budget.outputs.over != 'true' && steps.chair_probe.outputs.token_1 != 'dead'
       continue-on-error: true
       uses: anthropics/claude-code-action@v1
       with:
@@ -366,7 +423,7 @@ runs:
 
     - name: Chair review (backup token)
       id: chair_backup
-      if: steps.chair_primary.outcome != 'success' && steps.chair_probe.outputs.token_2 != 'dead' && inputs.claude_code_oauth_token_2 != ''
+      if: steps.budget.outputs.over != 'true' && steps.chair_primary.outcome != 'success' && steps.chair_probe.outputs.token_2 != 'dead' && inputs.claude_code_oauth_token_2 != ''
       continue-on-error: true
       uses: anthropics/claude-code-action@v1
       with:
@@ -378,7 +435,7 @@ runs:
 
     - name: Chair review (third token)
       id: chair_third
-      if: steps.chair_primary.outcome != 'success' && steps.chair_backup.outcome != 'success' && steps.chair_probe.outputs.token_3 != 'dead' && inputs.claude_code_oauth_token_3 != ''
+      if: steps.budget.outputs.over != 'true' && steps.chair_primary.outcome != 'success' && steps.chair_backup.outcome != 'success' && steps.chair_probe.outputs.token_3 != 'dead' && inputs.claude_code_oauth_token_3 != ''
       continue-on-error: true
       uses: anthropics/claude-code-action@v1
       with:
@@ -399,6 +456,7 @@ runs:
     - name: Chair fallback (OpenRouter)
       id: chair_fallback
       if: >-
+        steps.budget.outputs.over != 'true' &&
         steps.chair_primary.outcome != 'success' &&
         steps.chair_backup.outcome != 'success' &&
         steps.chair_third.outcome != 'success' &&
@@ -413,6 +471,48 @@ runs:
         CHAIR_FALLBACK_MODEL: ${{ inputs.chair_fallback_model }}
       run: node "${{ github.action_path }}/scripts/chair-fallback.mjs" pr.diff council-findings.md
 
+    # A budget stop is a routing decision, not a verdict on the code, so it
+    # leaves a comment and a label rather than a red check. It writes ONE
+    # comment and edits it after that: a pull request that stays over budget
+    # for five pushes must not collect five identical comments.
+    - name: Route the pull request to a person
+      if: steps.budget.outputs.over == 'true'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github_token }}
+        VCR_REPO: ${{ github.repository }}
+        VCR_PR: ${{ github.event.pull_request.number }}
+        VCR_REASON: ${{ steps.budget.outputs.reason }}
+        VCR_COUNCIL_RUNS: ${{ steps.budget.outputs.council_runs }}
+        VCR_BRANCH_RUNS: ${{ steps.budget.outputs.branch_runs }}
+      run: |
+        set -euo pipefail
+        MARKER="<!-- vibecodereview:budget -->"
+        gh label create needs-human --repo "$VCR_REPO" --color B60205 \
+          --description "Automation stopped; a person has to decide" 2>/dev/null || true
+        gh issue edit "$VCR_PR" --repo "$VCR_REPO" --add-label needs-human >/dev/null
+        {
+          echo "$MARKER"
+          echo "### This pull request is over budget"
+          echo
+          echo "The review stopped without running, because $VCR_REASON."
+          echo
+          echo "- Council runs on this PR: $VCR_COUNCIL_RUNS"
+          echo "- Workflow runs on this branch: $VCR_BRANCH_RUNS"
+          echo
+          echo "Nothing here says the code is wrong. It says the automation is not"
+          echo "converging, and another cycle costs what the last one cost. Decide:"
+          echo "split the change, fix the failure the loop keeps missing, or raise"
+          echo "\`max_council_runs\` for this repo if the ceiling is simply too low."
+        } > budget-comment.md
+        EXISTING=$(gh api "repos/$VCR_REPO/issues/$VCR_PR/comments" --jq \
+          "[.[] | select(.body | startswith(\"$MARKER\")) | .id] | first // empty")
+        if [ -n "$EXISTING" ]; then
+          gh api "repos/$VCR_REPO/issues/comments/$EXISTING" -X PATCH -F body=@budget-comment.md --silent
+        else
+          gh api "repos/$VCR_REPO/issues/$VCR_PR/comments" -X POST -F body=@budget-comment.md --silent
+        fi
+
     - name: Chair result gate
       shell: bash
       run: |
@@ -420,6 +520,9 @@ runs:
         B="${{ steps.chair_backup.outcome }}"
         T="${{ steps.chair_third.outcome }}"
         F="${{ steps.chair_fallback.outcome }}"
+        if [ "${{ steps.budget.outputs.over }}" = "true" ]; then
+          echo "chair: skipped, the pull request is over budget"; exit 0
+        fi
         if [ "$P" = "success" ]; then echo "chair: primary token succeeded"; exit 0; fi
         if [ "$B" = "success" ]; then echo "chair: primary did not review ($P); backup token succeeded"; exit 0; fi
         if [ "$T" = "success" ]; then echo "chair: primary and backup failed; third token succeeded"; exit 0; fi

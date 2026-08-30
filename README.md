@@ -99,6 +99,35 @@ Two things to set, especially if agents open most of your PRs:
   cancels the run it superseded instead of stacking beside it. `init` already
   writes one into `vibecodereview.yml`; hand-written workflows often lack it.
 
+### The ceiling that stops a runaway
+
+`max_fix_cycles` caps how often the chair pushes. It caps nothing else, so a pull
+request can still be reviewed again and again while its author pushes, and the
+arithmetic above repeats every time. A pull request on its sixth review is not
+converging, and a seventh costs what the first cost.
+
+Two ceilings stop it. Both default on:
+
+| Input | Default | Counts |
+|---|---|---|
+| `max_council_runs` | `6` | completed runs of this workflow on the pull request |
+| `max_branch_runs` | `60` | runs of every workflow in the repo on the branch |
+
+Set either to `0` to disable it.
+
+Over the ceiling, the action skips the council and the chair, labels the pull
+request `needs-human`, and leaves one comment saying which ceiling it hit and
+what to decide. It edits that comment rather than posting another. **The check
+still passes.** A budget stop is a routing decision, not a verdict on the code,
+and a red check there would hide a real failure behind a bookkeeping one.
+
+Both numbers come from one API call. Real billable minutes need a request per
+run, which turns a guard against waste into a source of it — so the ceilings
+count runs, on the reasoning that every run of a workflow costs about what the
+last one did. `scripts/budget-guard.test.sh` pins the arithmetic, including the
+case that matters most: a failed lookup reads as "no spend yet", never as "out
+of budget", so an API blip cannot stop every review in the fleet.
+
 ```yaml
 concurrency:
   group: ci-${{ github.ref }}
