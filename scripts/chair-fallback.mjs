@@ -91,6 +91,13 @@ async function askChair(diff, council, diffTruncated) {
 // prevent. Repairs only what is invalid; a well-formed reply is unchanged.
 const VALID_ESCAPE = new Set(['"', "\\", "/", "b", "f", "n", "r", "t", "u"]);
 const CONTROL_ESCAPE = { "\n": "\\n", "\r": "\\r", "\t": "\\t", "\b": "\\b", "\f": "\\f" };
+const HEX4 = /^[0-9a-fA-F]{4}/;
+// A backslash right before a quote is a genuine `\"` escape only if the string
+// keeps going afterward. If what follows (past whitespace) is a structural
+// JSON character, that quote is the real closing quote and the backslash is a
+// stray one — e.g. a Windows path ending in `\` — so treating it as `\"`
+// would swallow the closing quote and run the string past the object's end.
+const STRUCTURAL_AFTER_STRING = /^\s*[,:}\]]/;
 
 function repairJsonStrings(text) {
   let out = "";
@@ -106,7 +113,13 @@ function repairJsonStrings(text) {
     } else if (ch === "\\") {
       const next = text[i + 1];
       if (next === undefined) out += "\\\\";
-      else if (VALID_ESCAPE.has(next)) {
+      else if (next === '"' && STRUCTURAL_AFTER_STRING.test(text.slice(i + 2))) {
+        out += "\\\\";
+      } else if (next === "u" && !HEX4.test(text.slice(i + 2, i + 6))) {
+        // `\u` is only a valid escape when 4 hex digits follow; otherwise it's
+        // a path like `C:\users`, and only the backslash is invalid.
+        out += "\\\\";
+      } else if (VALID_ESCAPE.has(next)) {
         out += ch + next;
         i++;
       } else {
@@ -228,6 +241,21 @@ function selfcheck() {
   const backslashNewline = parseVerdict('{"verdict":"comment","summary":"end \\\nnext","findings":[]}');
   if (!backslashNewline.summary.includes("next")) {
     throw new Error("selfcheck: control char after invalid escape not repaired");
+  }
+
+  // A path like `C:\users` has `\u` followed by non-hex characters — not a
+  // valid unicode escape. Only the backslash should be escaped; `u` and the
+  // rest of the path must survive untouched.
+  const badUnicode = parseVerdict(String.raw`{"verdict":"comment","summary":"see C:\users\config","findings":[]}`);
+  if (!badUnicode.summary.includes("C:\\users\\config")) {
+    throw new Error("selfcheck: invalid \\u escape not repaired: " + JSON.stringify(badUnicode.summary));
+  }
+
+  // A value ending in a lone backslash right before the real closing quote
+  // (e.g. a Windows path) must not have that quote swallowed as `\"`.
+  const trailingBackslash = parseVerdict(String.raw`{"verdict":"comment","summary":"C:\path\","findings":[]}`);
+  if (trailingBackslash.summary !== "C:\\path\\") {
+    throw new Error("selfcheck: trailing backslash before closing quote not repaired: " + JSON.stringify(trailingBackslash.summary));
   }
 
   // Repair is not a licence to accept anything: a truncated object still fails.
