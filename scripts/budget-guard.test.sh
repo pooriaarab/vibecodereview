@@ -59,5 +59,9 @@ check false 'an empty run list is not over budget'      "$(guard '{"workflow_run
 # stop the very review that is running.
 check false 'an in-progress run does not count'         "$(guard '{"workflow_runs":[{"name":"vibecodereview","status":"in_progress","head_branch":"feature"},{"name":"vibecodereview","status":"in_progress","head_branch":"feature"},{"name":"vibecodereview","status":"in_progress","head_branch":"feature"},{"name":"vibecodereview","status":"in_progress","head_branch":"feature"},{"name":"vibecodereview","status":"in_progress","head_branch":"feature"},{"name":"vibecodereview","status":"in_progress","head_branch":"feature"}]}' 6 60)"
 
+# The same holds for the branch ceiling: several workflows queuing at once on a
+# fresh push must not look like spend that already happened.
+check false 'in-progress runs do not count toward the branch ceiling' "$(guard '{"workflow_runs":[{"name":"build","status":"in_progress","head_branch":"feature"},{"name":"build","status":"queued","head_branch":"feature"},{"name":"build","status":"in_progress","head_branch":"feature"},{"name":"build","status":"queued","head_branch":"feature"},{"name":"build","status":"in_progress","head_branch":"feature"},{"name":"build","status":"queued","head_branch":"feature"},{"name":"build","status":"in_progress","head_branch":"feature"},{"name":"build","status":"queued","head_branch":"feature"}]}' 6 8)"
+
 [ "$fails" = 0 ] || { printf '\n%s failing\n' "$fails" >&2; exit 1; }
 printf '\nall passing\n'
