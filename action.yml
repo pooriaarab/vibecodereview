@@ -371,10 +371,13 @@ runs:
     # the standout: it's a pure in-session bookkeeping tool (no filesystem/
     # network/GitHub side effect) that Claude Code's own system prompt actively
     # recommends for a numbered multi-step procedure — exactly the shape of this
-    # prompt — yet it was never in the allowlist. `ls`/`find`/`head`/`wc` are
-    # read-only exploration verbs added for the same reason: they can only let
-    # the chair gather more context, never less, so this cannot weaken the
-    # review. Kept OUT deliberately: WebFetch/WebSearch (no external network
+    # prompt — yet it was never in the allowlist. `ls`/`head`/`wc` are read-only
+    # exploration verbs added for the same reason: they can only let the chair
+    # gather more context, never less, so this cannot weaken the review. `find`
+    # is deliberately NOT included: `Bash(find:*)` would also match `find .
+    # -delete` and `find . -exec <cmd> {} \;`, which are destructive/arbitrary-
+    # execution, not read-only exploration — Glob already covers the pathfinding
+    # use case. Kept OUT deliberately: WebFetch/WebSearch (no external network
     # reach for a reviewer), Task (no subagent spawning), NotebookEdit/
     # SlashCommand/ExitPlanMode (not applicable here).
     - name: Chair review (primary token)
@@ -387,7 +390,7 @@ runs:
         use_commit_signing: true
         allowed_bots: "*"
         prompt: ${{ steps.prompt.outputs.text }}
-        claude_args: '--allowed-tools "Bash(gh api:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr review:*),Bash(gh pr comment:*),Bash(git:*),Bash(jq:*),Bash(cat:*),Bash(ls:*),Bash(find:*),Bash(head:*),Bash(wc:*),Read,Glob,Grep,Edit,Write,TodoWrite"'
+        claude_args: '--allowed-tools "Bash(gh api:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr review:*),Bash(gh pr comment:*),Bash(git:*),Bash(jq:*),Bash(cat:*),Bash(ls:*),Bash(head:*),Bash(wc:*),Read,Glob,Grep,Edit,Write,TodoWrite"'
 
     - name: Chair review (backup token)
       id: chair_backup
@@ -399,7 +402,7 @@ runs:
         use_commit_signing: true
         allowed_bots: "*"
         prompt: ${{ steps.prompt.outputs.text }}
-        claude_args: '--allowed-tools "Bash(gh api:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr review:*),Bash(gh pr comment:*),Bash(git:*),Bash(jq:*),Bash(cat:*),Bash(ls:*),Bash(find:*),Bash(head:*),Bash(wc:*),Read,Glob,Grep,Edit,Write,TodoWrite"'
+        claude_args: '--allowed-tools "Bash(gh api:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr review:*),Bash(gh pr comment:*),Bash(git:*),Bash(jq:*),Bash(cat:*),Bash(ls:*),Bash(head:*),Bash(wc:*),Read,Glob,Grep,Edit,Write,TodoWrite"'
 
     - name: Chair review (third token)
       id: chair_third
@@ -411,7 +414,7 @@ runs:
         use_commit_signing: true
         allowed_bots: "*"
         prompt: ${{ steps.prompt.outputs.text }}
-        claude_args: '--allowed-tools "Bash(gh api:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr review:*),Bash(gh pr comment:*),Bash(git:*),Bash(jq:*),Bash(cat:*),Bash(ls:*),Bash(find:*),Bash(head:*),Bash(wc:*),Read,Glob,Grep,Edit,Write,TodoWrite"'
+        claude_args: '--allowed-tools "Bash(gh api:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr review:*),Bash(gh pr comment:*),Bash(git:*),Bash(jq:*),Bash(cat:*),Bash(ls:*),Bash(head:*),Bash(wc:*),Read,Glob,Grep,Edit,Write,TodoWrite"'
 
     # Surface the true result: green if any chair run succeeded; red if they all
     # failed. Without this, continue-on-error would mask a genuine failure as
