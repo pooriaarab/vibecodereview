@@ -14,8 +14,7 @@ Closes #
      both fail the check, because neither tells a reviewer anything. Delete this comment. -->
 
 ```text
-bun test      ->
-bun run build ->
+npm run selfcheck ->
 ```
 
 Assisted-by: <agent>:<model>
