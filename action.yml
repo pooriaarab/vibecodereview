@@ -196,7 +196,10 @@ runs:
         # pr.diff and probe.1-3 into a public repo that way. Exclude them
         # locally so `git add -A` cannot see them. .git/info/exclude is not
         # committed, so this never touches the consumer repo's .gitignore.
-        printf '%s\n' pr.diff council-findings.md council.log council.pid 'probe.*' \
+        # Patterns are anchored to the workspace root (leading `/`) so a
+        # legitimately named file elsewhere in the tree, e.g. tests/probe.js
+        # or docs/pr.diff, is not silently excluded from the chair's commit.
+        printf '%s\n' /pr.diff /council-findings.md /council.log /council.pid '/probe.*' \
           >> "$(git rev-parse --git-dir)/info/exclude"
         gh pr diff ${{ github.event.pull_request.number }} > pr.diff || true
         nohup node "${{ github.action_path }}/scripts/council-review.mjs" \
