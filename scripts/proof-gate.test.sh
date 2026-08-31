@@ -91,5 +91,16 @@ process.stdout.write(rule && gated ? (on ? "on" : "off") : "missing");
   && report 0 'fallback chair is sent the body it must judge' \
   || report 1 'fallback chair is sent the body it must judge'
 
+# The fallback chair's rule must carry the SAME criteria as the primary chair's
+# and the scope lens's, not just any proof rule. A rule that demands evidence
+# but never checks for a wrong-screen screenshot or a stale capture is a
+# weaker gate hiding behind the same "proof required" label.
+( cd "$ROOT" && grep -q 'embedded screenshot shows a screen this diff does not touch' scripts/chair-fallback.mjs ) \
+  && report 0 'fallback chair rejects a wrong-screen screenshot' \
+  || report 1 'fallback chair rejects a wrong-screen screenshot'
+( cd "$ROOT" && grep -q 'predates the newest commit that touched a path it exercises' scripts/chair-fallback.mjs ) \
+  && report 0 'fallback chair rejects stale evidence' \
+  || report 1 'fallback chair rejects stale evidence'
+
 [ "$fails" = 0 ] || { printf '\n%s failing\n' "$fails" >&2; exit 1; }
 printf '\nall passing\n'
