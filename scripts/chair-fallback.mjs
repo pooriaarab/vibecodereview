@@ -15,6 +15,7 @@
 
 import fs from "node:fs";
 import { execFileSync } from "node:child_process";
+import { pathToFileURL } from "node:url";
 
 const MAX_DIFF_CHARS = 180_000;
 const TIMEOUT_MS = Number(process.env.CHAIR_FALLBACK_TIMEOUT_MS) || 180_000;
@@ -25,17 +26,26 @@ const SEVERITIES = { critical: "Critical", major: "Major", minor: "Minor" };
 // chair's prompt, and this one. It reached the first two and not this one, so a
 // subscription outage silently turned proof off — the failure mode this file
 // exists to prevent, arriving through the file itself.
-const REQUIRE_PROOF = process.env.VCR_REQUIRE_PROOF !== "false";
-const PROOF_RULE = REQUIRE_PROOF
-  ? `
+// Only the criteria this chair can actually apply. It has no tools: it never
+// receives image bytes, and it never receives a commit list or commit dates. So
+// it cannot check what a screenshot depicts, and it cannot check whether a
+// capture predates a commit. The other two paths keep both criteria; claiming
+// them here would be a guarantee this chair cannot keep, and a claimed check is
+// worse than an admitted gap in the one path that only runs during an outage.
+export function buildProofRule(requireProof = process.env.VCR_REQUIRE_PROOF !== "false") {
+  if (!requireProof) return "";
+  return `
 - Judge the evidence too. The body's \`## How I verified\` must carry evidence that
   matches the diff. Flag it when a visible change shows no before/after capture,
-  when an embedded screenshot shows a screen this diff does not touch, when a named
-  command has no result, when the evidence leaves untested a code path this PR
-  changes, when the evidence predates the newest commit that touched a path it
-  exercises, or when a \`Proof: n/a\` reason does not hold. Name the capture that
-  would settle it. Never invent evidence: it is the author's to produce.`
-  : "";
+  when a named command has no result, when the evidence leaves untested a code path
+  this PR changes, or when a \`Proof: n/a\` reason does not hold. Name the capture
+  that would settle it. Never invent evidence: it is the author's to produce.
+- You cannot see images or commit dates, so do NOT rule on what a screenshot
+  depicts or on whether a capture is stale. Say the full-tool chair must judge
+  those.`;
+}
+
+const PROOF_RULE = buildProofRule();
 
 const SYSTEM = `You chair a multi-model code review council. You receive a pull request diff and
 the council's per-lens findings. Produce ONE review.
@@ -369,7 +379,11 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  console.error("Fallback chair failed:", err?.message || err);
-  process.exit(1);
-});
+// Run only when invoked directly. A test that imports this file to check the
+// proof rule must not fire the network calls and the process.exit in main().
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((err) => {
+    console.error("Fallback chair failed:", err?.message || err);
+    process.exit(1);
+  });
+}

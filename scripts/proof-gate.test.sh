@@ -77,35 +77,39 @@ chair true | grep -q 'leaves untested a code path this PR changes' && report 0 '
 # Path 3: the OpenRouter fallback chair. It runs only when every Claude
 # subscription has failed, and it had no proof rule at all — so an outage
 # silently turned proof off while the check still reported green.
-fallback() { VCR_REQUIRE_PROOF="$1" node --input-type=module -e '
-const src = await import("node:fs").then(m => m.readFileSync("scripts/chair-fallback.mjs", "utf8"));
-const on = process.env.VCR_REQUIRE_PROOF !== "false";
-const rule = src.includes("Judge the evidence too");
-const gated = src.includes("VCR_REQUIRE_PROOF !== \"false\"");
-process.stdout.write(rule && gated ? (on ? "on" : "off") : "missing");
+#
+# This calls the real function rather than grepping the file. The first version
+# greped for two literal strings, so an inverted ternary or a typo'd env name
+# would have kept every assertion green while the gate did nothing.
+fallback() { VCR_REQUIRE_PROOF="$1" node -e '
+const m = await import("./scripts/chair-fallback.mjs");
+process.stdout.write(m.buildProofRule() === "" ? "off" : "on");
 '; }
 ( cd "$ROOT" && [ "$(fallback true)" = on ] ) \
-  && report 0 'fallback chair carries a proof rule, gated on the flag' \
-  || report 1 'fallback chair carries a proof rule, gated on the flag'
+  && report 0 'fallback chair builds a proof rule by default' \
+  || report 1 'fallback chair builds a proof rule by default'
+( cd "$ROOT" && [ "$(fallback false)" = off ] ) \
+  && report 0 'fallback chair drops the rule when require_proof is false' \
+  || report 1 'fallback chair drops the rule when require_proof is false'
 ( cd "$ROOT" && grep -q 'PR title, body and linked issues' scripts/chair-fallback.mjs ) \
   && report 0 'fallback chair is sent the body it must judge' \
   || report 1 'fallback chair is sent the body it must judge'
 
-# The fallback chair's rule must carry the SAME criteria as the primary chair's
-# and the scope lens's, not just any proof rule. A rule that demands evidence
-# but never checks for a wrong-screen screenshot or a stale capture is a
-# weaker gate hiding behind the same "proof required" label.
-# The rule is wrapped over several lines in the source, so squeeze the
-# whitespace before matching. A grep for a phrase that happens to straddle a
-# line break fails on the formatting rather than on the rule, which is how a
-# passing test starts reporting a missing criterion that is right there.
-fallback_rule() { tr -s '[:space:]' ' ' < "$ROOT/scripts/chair-fallback.mjs"; }
-fallback_rule | grep -q 'embedded screenshot shows a screen this diff does not touch' \
-  && report 0 'fallback chair rejects a wrong-screen screenshot' \
-  || report 1 'fallback chair rejects a wrong-screen screenshot'
-fallback_rule | grep -q 'predates the newest commit that touched a path it exercises' \
-  && report 0 'fallback chair rejects stale evidence' \
-  || report 1 'fallback chair rejects stale evidence'
+# This chair has no tools: no image bytes, no commit dates. It must not claim a
+# check it cannot perform, and it must say who can.
+rule() { cd "$ROOT" && node -e '
+const m = await import("./scripts/chair-fallback.mjs");
+process.stdout.write(m.buildProofRule(true));
+' | tr -s '[:space:]' ' '; }
+rule | grep -q 'shows a screen this diff does not touch' \
+  && report 1 'fallback chair does not rule on what a screenshot depicts' \
+  || report 0 'fallback chair does not rule on what a screenshot depicts'
+rule | grep -q 'predates the newest commit' \
+  && report 1 'fallback chair does not rule on stale evidence' \
+  || report 0 'fallback chair does not rule on stale evidence'
+rule | grep -q 'full-tool chair must judge those' \
+  && report 0 'fallback chair says who can judge those' \
+  || report 1 'fallback chair says who can judge those'
 
 [ "$fails" = 0 ] || { printf '\n%s failing\n' "$fails" >&2; exit 1; }
 printf '\nall passing\n'
