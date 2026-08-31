@@ -189,6 +189,15 @@ runs:
         COUNCIL_TIMEOUT_MS: ${{ inputs.council_timeout_ms }}
         PR_CONTEXT_FILE: ${{ runner.temp }}/pr-context.txt
       run: |
+        # The council's scratch files live in the workspace, because the chair
+        # prompt tells it to `cat pr.diff` and read `council-findings.md`. But
+        # the chair's fix step runs `git add -A`, which sweeps them into the
+        # commit -- pooriaarab/skills#209 shipped council.log, council.pid,
+        # pr.diff and probe.1-3 into a public repo that way. Exclude them
+        # locally so `git add -A` cannot see them. .git/info/exclude is not
+        # committed, so this never touches the consumer repo's .gitignore.
+        printf '%s\n' pr.diff council-findings.md council.log council.pid 'probe.*' \
+          >> "$(git rev-parse --git-dir)/info/exclude"
         gh pr diff ${{ github.event.pull_request.number }} > pr.diff || true
         nohup node "${{ github.action_path }}/scripts/council-review.mjs" \
           pr.diff council-findings.md > council.log 2>&1 &
