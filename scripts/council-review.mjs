@@ -36,13 +36,15 @@ const MAX_DIFF_CHARS = 180_000; // bound tokens/cost on large PRs
 // reasoning model on a large diff. Raise COUNCIL_TIMEOUT_MS if a member you
 // value is being cut off — the per-member timings logged below tell you.
 const REQUEST_TIMEOUT_MS = Number(process.env.COUNCIL_TIMEOUT_MS) || 90_000;
+// A CLI seat spawns a process rather than issuing one POST, so it needs a
+// longer ceiling than the HTTP members.
+const CLI_TIMEOUT_MS = Number(process.env.CLI_TIMEOUT_MS || 240_000);
 
 // All providers expose an OpenAI-compatible /chat/completions endpoint
 // (Gemini via its OpenAI-compat URL), so one request shape serves all.
 import {
   PROVIDERS,
   LENSES,
-  OPENROUTER_EQUIVALENT,
   CREDENTIAL_FAILURE_STATUSES,
   openRouterFallbackFor,
   DEFAULT_MODELS,
@@ -50,6 +52,7 @@ import {
   diffAddsTestLines,
   selfcheckMutationRoster,
 } from "./council-config.mjs";
+import { callClaudeCli } from "./claude-cli-seat.mjs";
 
 function parseModels() {
   const csv = process.env.COUNCIL_MODELS?.trim();
@@ -88,6 +91,13 @@ async function callModel(model, diff) {
   const startedAt = Date.now();
   const timed = (r) => ({ ...r, ms: Date.now() - startedAt });
   const provider = PROVIDERS[model.provider];
+  // A subscription seat has no chat endpoint to POST to.
+  if (provider?.cli) {
+    const token = process.env[provider.keyEnv]?.trim();
+    if (!token) return timed({ model, error: `skipped: ${provider.keyEnv} not set` });
+    const instructions = `${systemPrompt(model.lens)}\n\nReview the PR diff piped on stdin.`;
+    return timed(await callClaudeCli(model, diff, token, { instructions, timeoutMs: CLI_TIMEOUT_MS }));
+  }
   if (provider && !provider.url) return timed({ model, error: "skipped: CUSTOM_BASE_URL not set" });
   const apiKey = provider && process.env[provider.keyEnv]?.trim();
   if (!apiKey) return timed({ model, error: `skipped: ${provider?.keyEnv || model.provider} not set` });
@@ -303,6 +313,20 @@ async function main() {
       fs.rmSync(testDir, { recursive: true, force: true });
     }
 
+
+    // A CLI-backed seat with no oauth token must skip too, not shell out --
+    // even when the ambient env sets one, so the check stays offline.
+    const savedToken = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+    delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
+    let cliSkip;
+    try {
+      cliSkip = await callModel({ provider: "claude", model: "x", name: "X", lens: "correctness" }, "diff");
+    } finally {
+      if (savedToken !== undefined) process.env.CLAUDE_CODE_OAUTH_TOKEN = savedToken;
+    }
+    if (!cliSkip.error?.includes("CLAUDE_CODE_OAUTH_TOKEN")) {
+      throw new Error("selfcheck: claude missing-token path wrong: " + cliSkip.error);
+    }
     console.log("selfcheck ok");
     return;
   }
