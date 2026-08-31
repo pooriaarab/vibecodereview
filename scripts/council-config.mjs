@@ -80,16 +80,32 @@ const TEST_PATH = /(^|\/)(tests?|spec|__tests__)\/|[._-](test|spec)\.[a-z]+$|(^|
 // Read the `+++ b/<path>` headers, not every `+` line: a hunk body line that
 // happens to start with "+" is content, not a filename, and matching those
 // would enable the lens on any diff that adds a line beginning with a plus.
+//
+// A "+++ " header is only trusted immediately after its paired "--- " header --
+// never on its own. Unified diff always emits them as a pair, so this is a safe
+// anchor; without it, an ADDED source line that itself starts with "++ "
+// (e.g. a bare `++ counter;` statement) becomes "+++ counter;" once prefixed
+// by the diff and would be misread as a new file header, resetting
+// `inTestFile` and silently hiding the real test lines that follow.
 export function diffAddsTestLines(diff) {
   let inTestFile = false;
+  let afterMinusHeader = false;
   for (const line of String(diff || "").split("\n")) {
-    if (line.startsWith("+++ ")) {
+    if (line.startsWith("diff --git ")) {
+      afterMinusHeader = false;
+      continue;
+    }
+    if (line.startsWith("--- ")) {
+      afterMinusHeader = true;
+      continue;
+    }
+    if (afterMinusHeader && line.startsWith("+++ ")) {
+      afterMinusHeader = false;
       const path = line.slice(4).replace(/^b\//, "").trim();
       inTestFile = path !== "/dev/null" && TEST_PATH.test(path);
       continue;
     }
-    if (line.startsWith("--- ") || line.startsWith("diff --git ")) continue;
-    // A "+++" header is caught above, so any remaining "+" line is content.
+    afterMinusHeader = false;
     if (inTestFile && line.startsWith("+")) return true;
   }
   return false;
@@ -144,19 +160,35 @@ export function selfcheckMutationRoster(buildFindingsMarkdown) {
   // something that gets expensive once it runs what it proposes, so a default
   // roster that quietly included it would be a cost nobody chose.
   if (DEFAULT_MODELS.some((m) => m.lens === "mutation")) throw new Error("selfcheck: mutation lens is a default member");
-  const testDiff = "diff --git a/tests/t.py b/tests/t.py\n+++ b/tests/t.py\n+assert f() == 1\n";
-  const codeDiff = "diff --git a/src/a.ts b/src/a.ts\n+++ b/src/a.ts\n+const x = 1;\n";
+  const testDiff = "diff --git a/tests/t.py b/tests/t.py\n--- a/tests/t.py\n+++ b/tests/t.py\n+assert f() == 1\n";
+  const codeDiff = "diff --git a/src/a.ts b/src/a.ts\n--- a/src/a.ts\n+++ b/src/a.ts\n+const x = 1;\n";
   if (diffAddsTestLines(codeDiff)) throw new Error("selfcheck: a code-only diff counted as adding tests");
   if (!diffAddsTestLines(testDiff)) throw new Error("selfcheck: a test diff did not count as adding tests");
   // A test file that is only DELETED from adds nothing to review.
-  if (diffAddsTestLines("+++ b/tests/t.py\n-assert f() == 1\n")) throw new Error("selfcheck: a deletion counted as adding tests");
+  if (diffAddsTestLines("--- a/tests/t.py\n+++ b/tests/t.py\n-assert f() == 1\n")) throw new Error("selfcheck: a deletion counted as adding tests");
   // The header itself starts with "+", so a naive scan of "+" lines would
   // report every diff as touching tests the moment one test file appears.
-  if (diffAddsTestLines("+++ b/tests/t.py\n")) throw new Error("selfcheck: the +++ header counted as an added line");
+  if (diffAddsTestLines("--- a/tests/t.py\n+++ b/tests/t.py\n")) throw new Error("selfcheck: the +++ header counted as an added line");
   // ...and the flag has to reset at the next file, or one test file makes
   // every later hunk in the diff look like a test.
-  if (diffAddsTestLines("+++ b/tests/t.py\n context\n+++ b/src/a.ts\n+const x = 1;\n")) {
+  if (
+    diffAddsTestLines(
+      "--- a/tests/t.py\n+++ b/tests/t.py\n context\n--- a/src/a.ts\n+++ b/src/a.ts\n+const x = 1;\n",
+    )
+  ) {
     throw new Error("selfcheck: test-file flag leaked into the next file");
+  }
+  // An ADDED line that itself starts with "++ " (e.g. a bare `++ counter;`
+  // statement) is prefixed to "+++ counter;" by the diff. Without pairing a
+  // "+++ " header to its preceding "--- " line, that content line would be
+  // misread as a new file header and silently swallow the real test line
+  // that follows it.
+  if (
+    !diffAddsTestLines(
+      "--- a/tests/t.py\n+++ b/tests/t.py\n+++ counter;\n+assert f() == 1\n",
+    )
+  ) {
+    throw new Error("selfcheck: an added '++ ' content line was misread as a file header");
   }
   const savedLens = process.env.MUTATION_LENS;
   try {

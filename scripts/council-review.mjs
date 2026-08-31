@@ -47,6 +47,7 @@ import {
   openRouterFallbackFor,
   DEFAULT_MODELS,
   withMutationMember,
+  diffAddsTestLines,
   selfcheckMutationRoster,
 } from "./council-config.mjs";
 
@@ -345,7 +346,16 @@ async function main() {
   // truncated) `diff` sent to models: on a diff over MAX_DIFF_CHARS whose test
   // hunks fall past the cutoff, scanning the truncated text would wrongly
   // report no test lines and silently drop the lens.
-  const { members, mutationSkipped } = withMutationMember(models, diffRaw);
+  let { members, mutationSkipped } = withMutationMember(models, diffRaw);
+  // diffRaw only decides whether tests exist ANYWHERE in the PR; it says
+  // nothing about whether those test hunks survived truncation into `diff`,
+  // which is what the model actually receives. Dispatching on diffRaw's answer
+  // while sending the truncated `diff` would burn a call on a member that
+  // cannot see the tests it was enabled to review.
+  if (members.some((m) => m.lens === "mutation") && diffTruncated && !diffAddsTestLines(diff)) {
+    members = members.filter((m) => m.lens !== "mutation");
+    mutationSkipped = "the diff was truncated before its added test lines";
+  }
   if (mutationSkipped) console.log(`Mutation lens enabled but not dispatched: ${mutationSkipped}`);
 
   console.log(`Council: ${members.map((m) => `${m.name} [${m.provider}]`).join(", ")}`);
