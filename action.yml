@@ -60,6 +60,14 @@ inputs:
     description: "Per-member deadline for the council fan-out. Members run in parallel, so this is the council's worst-case wall time. Omit for the 90s default."
     required: false
     default: ""
+  mutation_lens:
+    description: "Set to `true` to add a sixth member that asks whether the tests in the diff can fail at all: for each test added or changed it names one concrete mutation to the code under it that the test must catch. Off by default. It is dropped automatically on a diff that adds no test lines, and the report says so. It proposes mutations and does not run them — treat a finding as a claim to check, not a measured result."
+    required: false
+    default: "false"
+  mutation_model:
+    description: "Model for the mutation member, over OpenRouter. Its own env var keeps it from silently repointing the scope or maintainability lens, which ride the same OpenRouter route. It still shares openrouter_api_key with those lenses, so a quota failure on that key still takes out all three."
+    required: false
+    default: ""
 
 runs:
   using: "composite"
@@ -187,6 +195,8 @@ runs:
         OPENROUTER_API_KEY: ${{ inputs.openrouter_api_key }}
         COUNCIL_MODELS: ${{ inputs.council_models }}
         COUNCIL_TIMEOUT_MS: ${{ inputs.council_timeout_ms }}
+        MUTATION_LENS: ${{ inputs.mutation_lens }}
+        MUTATION_MODEL: ${{ inputs.mutation_model }}
         PR_CONTEXT_FILE: ${{ runner.temp }}/pr-context.txt
       run: |
         gh pr diff ${{ github.event.pull_request.number }} > pr.diff || true
