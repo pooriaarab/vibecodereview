@@ -13,6 +13,15 @@ export const PROVIDERS = {
   // Generic OpenAI-compatible endpoint (OpenRouter, self-hosted proxy, local
   // OffRouter). URL comes from env at call time; unset means the member skips.
   custom: { url: process.env.CUSTOM_BASE_URL, keyEnv: "CUSTOM_API_KEY" },
+  // Subscription-backed seats. These do NOT post to a chat endpoint -- no
+  // OpenAI-compatible URL accepts a Claude Code OAuth token -- so they shell
+  // the Claude Code CLI the action already installs for the chair. The cost
+  // lands on the Claude subscription instead of a metered API key, which is the
+  // whole point: the metered keys are what keep running dry.
+  // `claude2` exists so a second subscription can hold its own seat rather than
+  // idling as the chair's failover token.
+  claude: { cli: true, keyEnv: "CLAUDE_CODE_OAUTH_TOKEN" },
+  claude2: { cli: true, keyEnv: "CLAUDE_CODE_OAUTH_TOKEN_2" },
 };
 
 // Diverse lenses so each model catches what the others miss.

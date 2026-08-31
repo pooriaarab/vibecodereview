@@ -34,7 +34,7 @@ inputs:
     required: false
     default: "anthropic/claude-sonnet-5"
   council_models:
-    description: "Optional CSV override: provider|model|Name|lens,... (providers: openai, gemini, moonshot, openrouter)."
+    description: "Optional CSV override: provider|model|Name|lens,... (providers: openai, gemini, moonshot, openrouter, custom, claude, claude2). `claude`/`claude2` are subscription-backed seats that shell the Claude Code CLI using claude_code_oauth_token / _2 instead of a metered API key."
     required: false
   can_push_fixes:
     description: "If true, the chair may commit and push fixes to the PR branch."
@@ -197,6 +197,9 @@ runs:
         GEMINI_API_KEY: ${{ inputs.gemini_api_key }}
         MOONSHOT_API_KEY: ${{ inputs.moonshot_api_key }}
         OPENROUTER_API_KEY: ${{ inputs.openrouter_api_key }}
+        # Subscription-backed council seats (provider `claude` / `claude2`).
+        CLAUDE_CODE_OAUTH_TOKEN: ${{ inputs.claude_code_oauth_token }}
+        CLAUDE_CODE_OAUTH_TOKEN_2: ${{ inputs.claude_code_oauth_token_2 }}
         COUNCIL_MODELS: ${{ inputs.council_models }}
         COUNCIL_TIMEOUT_MS: ${{ inputs.council_timeout_ms }}
         MUTATION_LENS: ${{ inputs.mutation_lens }}

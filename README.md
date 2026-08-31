@@ -107,6 +107,33 @@ setting it cannot silently repoint the scope or maintainability lens (both also
 ride OpenRouter). It still shares `OPENROUTER_API_KEY` with those lenses, so an
 exhausted key takes all three out together, not just one.
 
+### Claude subscription seats
+
+Every other seat needs a metered API key, and those are what run dry — a repo
+can sit at three-of-four members returning HTTP 429 while the posted summary
+still lists four reviewers, so a PR looks multi-model reviewed when only the
+chair ran.
+
+A Claude Code OAuth token is not an API bearer, so it cannot hold a normal
+seat. The `claude` and `claude2` providers shell the Claude Code CLI (already
+installed for the chair) instead of POSTing, putting the cost on the
+subscription. `claude2` lets a second subscription hold a real seat rather
+than idling as the chair's failover token.
+
+```yaml
+council_models: >-
+  claude|claude-opus-5|Claude Opus 5|correctness,
+  claude2|claude-sonnet-5|Claude Sonnet 5|security,
+  openrouter|google/gemini-3.1-pro-preview|Gemini 3.1 Pro|performance,
+  openrouter|x-ai/grok-4.6|Grok 4.6|maintainability
+```
+
+The seats run with no tools, `--max-turns 1`, and a working directory outside
+the PR checkout — `claude -p` skips the workspace-trust prompt and would
+otherwise execute a repo-local `.claude/settings.json` hook with every secret
+in the step's environment. Set `CLI_TIMEOUT_MS` to change their budget
+(default 240000).
+
 ### Custom / OffRouter provider
 
 Point a council member at any OpenAI-compatible gateway: OpenRouter, a

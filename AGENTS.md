@@ -30,8 +30,11 @@ never fork its provider/lens logic into the surfaces.
 ## Rules
 
 - Zero runtime deps. Node ≥20, global `fetch` only. Do not add npm dependencies.
-- Providers: `openai`, `gemini`, `moonshot`, `openrouter`. Add one by extending
-  `PROVIDERS` + `DEFAULT_MODELS` in the engine only.
+- Providers: `openai`, `gemini`, `moonshot`, `openrouter`, `custom`, `claude`,
+  `claude2`. The last two are subscription-backed: they shell the Claude Code
+  CLI rather than POSTing, and add no npm dependency. Add one by extending
+  `PROVIDERS` in `council-config.mjs` (+ `DEFAULT_MODELS` if it should be on by
+  default).
 - A member with no API key must skip with a note, never throw.
 - The council uses a scope lens to verify atomicity and claim alignment. Set `PR_CONTEXT_FILE` to a file containing the author's claim (title, body, closed issues) to feed this lens.
 - A composite action's `inputs:` block must contain NO `${{ }}` expressions — not in a default AND not in a description string; GitHub parses them and fails at 'Set up job'. Callers pass github_token explicitly.
