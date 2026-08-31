@@ -95,10 +95,15 @@ process.stdout.write(rule && gated ? (on ? "on" : "off") : "missing");
 # and the scope lens's, not just any proof rule. A rule that demands evidence
 # but never checks for a wrong-screen screenshot or a stale capture is a
 # weaker gate hiding behind the same "proof required" label.
-( cd "$ROOT" && grep -q 'embedded screenshot shows a screen this diff does not touch' scripts/chair-fallback.mjs ) \
+# The rule is wrapped over several lines in the source, so squeeze the
+# whitespace before matching. A grep for a phrase that happens to straddle a
+# line break fails on the formatting rather than on the rule, which is how a
+# passing test starts reporting a missing criterion that is right there.
+fallback_rule() { tr -s '[:space:]' ' ' < "$ROOT/scripts/chair-fallback.mjs"; }
+fallback_rule | grep -q 'embedded screenshot shows a screen this diff does not touch' \
   && report 0 'fallback chair rejects a wrong-screen screenshot' \
   || report 1 'fallback chair rejects a wrong-screen screenshot'
-( cd "$ROOT" && grep -q 'predates the newest commit that touched a path it exercises' scripts/chair-fallback.mjs ) \
+fallback_rule | grep -q 'predates the newest commit that touched a path it exercises' \
   && report 0 'fallback chair rejects stale evidence' \
   || report 1 'fallback chair rejects stale evidence'
 
