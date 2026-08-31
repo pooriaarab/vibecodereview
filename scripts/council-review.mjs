@@ -341,8 +341,11 @@ async function main() {
 
   // Composed here rather than beside parseModels, because whether the mutation
   // member is worth dispatching is a fact about the diff, which does not exist
-  // until it has been read and truncated above.
-  const { members, mutationSkipped } = withMutationMember(models, diff);
+  // until it has been read above. Checked against diffRaw, not the (possibly
+  // truncated) `diff` sent to models: on a diff over MAX_DIFF_CHARS whose test
+  // hunks fall past the cutoff, scanning the truncated text would wrongly
+  // report no test lines and silently drop the lens.
+  const { members, mutationSkipped } = withMutationMember(models, diffRaw);
   if (mutationSkipped) console.log(`Mutation lens enabled but not dispatched: ${mutationSkipped}`);
 
   console.log(`Council: ${members.map((m) => `${m.name} [${m.provider}]`).join(", ")}`);

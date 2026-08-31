@@ -122,11 +122,17 @@ export function mutationMember() {
 // It is dropped on a diff that adds no test lines. The lens asks whether the
 // tests here could fail; with no test added there is no question to ask, and
 // dispatching it anyway is spend that can only return "No findings".
+//
+// Any pre-existing "mutation"-lens entry in `models` (a COUNCIL_MODELS override
+// can name any lens string) is stripped before the gate runs. Otherwise a CSV
+// override naming the "mutation" lens would dispatch it unconditionally,
+// bypassing both the mutation_lens opt-in and the no-tests-added skip.
 export function withMutationMember(models, diff) {
+  const base = models.filter((m) => m.lens !== "mutation");
   const mutation = mutationMember();
-  if (!mutation) return { members: models, mutationSkipped: null };
-  if (!diffAddsTestLines(diff)) return { members: models, mutationSkipped: "the diff adds no test lines" };
-  return { members: [...models, mutation], mutationSkipped: null };
+  if (!mutation) return { members: base, mutationSkipped: null };
+  if (!diffAddsTestLines(diff)) return { members: base, mutationSkipped: "the diff adds no test lines" };
+  return { members: [...base, mutation], mutationSkipped: null };
 }
 
 // The roster's own offline checks live beside the roster, for the same reason
@@ -156,9 +162,21 @@ export function selfcheckMutationRoster(buildFindingsMarkdown) {
   try {
     delete process.env.MUTATION_LENS;
     if (withMutationMember([], testDiff).members.length !== 0) throw new Error("selfcheck: mutation member added while disabled");
+    // A COUNCIL_MODELS override can name any lens string, including "mutation".
+    // With the gate disabled that entry must be stripped, not dispatched as-is
+    // -- otherwise a hand-written CSV row bypasses mutation_lens entirely.
+    const smuggled = [{ provider: "openrouter", model: "x", name: "Smuggled", lens: "mutation" }];
+    if (withMutationMember(smuggled, testDiff).members.length !== 0) {
+      throw new Error("selfcheck: a pre-existing mutation-lens member was dispatched while the gate is disabled");
+    }
     process.env.MUTATION_LENS = "true";
     const on = withMutationMember([], testDiff);
     if (on.members.length !== 1 || on.members[0].lens !== "mutation") throw new Error("selfcheck: mutation member not added when enabled");
+    // Even enabled, a smuggled entry must not double up with the canonical one.
+    const onWithSmuggled = withMutationMember(smuggled, testDiff);
+    if (onWithSmuggled.members.length !== 1 || onWithSmuggled.members[0].name !== "Claude Sonnet 5 (mutation)") {
+      throw new Error("selfcheck: a pre-existing mutation-lens member duplicated the canonical one");
+    }
     const skipped = withMutationMember([], codeDiff);
     if (skipped.members.length !== 0) throw new Error("selfcheck: mutation member dispatched on a diff with no tests");
     if (!skipped.mutationSkipped) throw new Error("selfcheck: skipped mutation member reported no reason");
