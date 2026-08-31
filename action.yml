@@ -204,6 +204,21 @@ runs:
         PR_CONTEXT_FILE: ${{ runner.temp }}/pr-context.txt
         REQUIRE_PROOF: ${{ inputs.require_proof }}
       run: |
+        # The council's scratch files live in the workspace, because the chair
+        # prompt tells it to `cat pr.diff` and read `council-findings.md`. But
+        # the chair's fix step runs `git add -A`, which sweeps them into the
+        # commit -- pooriaarab/skills#209 shipped council.log, council.pid,
+        # pr.diff and probe.1-3 into a public repo that way. Exclude them
+        # locally so `git add -A` cannot see them. .git/info/exclude is not
+        # committed, so this never touches the consumer repo's .gitignore.
+        # Patterns are anchored to the workspace root (leading `/`) so a
+        # legitimately named file elsewhere in the tree, e.g. tests/probe.js
+        # or docs/pr.diff, is not silently excluded from the chair's commit.
+        # Listed exactly (no `probe.*` glob) so a legitimately named
+        # `probe.<ext>` file elsewhere at the root is never swallowed.
+        printf '%s\n' /pr.diff /council-findings.md /council.log /council.pid \
+          /probe.1 /probe.2 /probe.3 /reason.1 /reason.2 /reason.3 \
+          >> "$(git rev-parse --git-dir)/info/exclude"
         gh pr diff ${{ github.event.pull_request.number }} > pr.diff || true
         nohup node "${{ github.action_path }}/scripts/council-review.mjs" \
           pr.diff council-findings.md > council.log 2>&1 &
