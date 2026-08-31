@@ -10,7 +10,8 @@
 //
 // Usage: node chair-fallback.mjs <diff-file> <council-findings-file>
 // Env: OPENROUTER_API_KEY, GH_TOKEN, GITHUB_REPOSITORY, PR_NUMBER,
-//      CHAIR_FALLBACK_MODEL (default anthropic/claude-sonnet-5)
+//      CHAIR_FALLBACK_MODEL (default anthropic/claude-sonnet-5),
+//      PR_CONTEXT_FILE, VCR_REQUIRE_PROOF
 
 import fs from "node:fs";
 import { execFileSync } from "node:child_process";
@@ -19,6 +20,20 @@ const MAX_DIFF_CHARS = 180_000;
 const TIMEOUT_MS = Number(process.env.CHAIR_FALLBACK_TIMEOUT_MS) || 180_000;
 const MODEL = process.env.CHAIR_FALLBACK_MODEL || "anthropic/claude-sonnet-5";
 const SEVERITIES = { critical: "Critical", major: "Major", minor: "Minor" };
+
+// The proof lens travels three code paths: the council scope lens, the primary
+// chair's prompt, and this one. It reached the first two and not this one, so a
+// subscription outage silently turned proof off — the failure mode this file
+// exists to prevent, arriving through the file itself.
+const REQUIRE_PROOF = process.env.VCR_REQUIRE_PROOF !== "false";
+const PROOF_RULE = REQUIRE_PROOF
+  ? `
+- Judge the evidence too. The body's \`## How I verified\` must carry evidence that
+  matches the diff. Flag it when a visible change shows no before/after capture,
+  when a named command has no result, when the evidence leaves untested a code path
+  this PR changes, or when a \`Proof: n/a\` reason does not hold. Name the capture
+  that would settle it. Never invent evidence: it is the author's to produce.`
+  : "";
 
 const SYSTEM = `You chair a multi-model code review council. You receive a pull request diff and
 the council's per-lens findings. Produce ONE review.
@@ -36,7 +51,7 @@ Rules:
 - Assume the author is competent. Report only diff-introduced defects that have
   a concrete failure trigger.
 - Severity: Critical (security, crash, data loss), Major (real bug or
-  convention violation), Minor (everything else).
+  convention violation), Minor (everything else).${PROOF_RULE}
 
 Reply with STRICT JSON and nothing else:
 {"verdict":"approve"|"request_changes"|"comment","summary":"<markdown>","findings":[{"severity":"Critical"|"Major"|"Minor","file":"<path>","line":<number|null>,"body":"<markdown>"}]}
@@ -46,6 +61,18 @@ when nothing Critical or Major survives. Otherwise "comment".`;
 
 function truncate(s, n) {
   return s.length > n ? s.slice(0, n) : s;
+}
+
+function prContext() {
+  const path = process.env.PR_CONTEXT_FILE;
+  if (!path) return "";
+  try {
+    return truncate(fs.readFileSync(path, "utf8"), 20_000);
+  } catch {
+    // The context file is written by an earlier step. A review without it is
+    // weaker; a review that throws because of it is none at all.
+    return "";
+  }
 }
 
 async function askChair(diff, council, diffTruncated) {
@@ -69,6 +96,7 @@ async function askChair(diff, council, diffTruncated) {
             role: "user",
             content:
               (diffTruncated ? "NOTE: this diff was truncated for length. Judge only what you can see.\n\n" : "") +
+              (prContext() ? `PR title, body and linked issues:\n\n${prContext()}\n\n---\n\n` : "") +
               `PR diff:\n\n${diff}\n\n---\n\nCouncil findings:\n\n${council}`,
           },
         ],
