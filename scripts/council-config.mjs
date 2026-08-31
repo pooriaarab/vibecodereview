@@ -77,6 +77,16 @@ export const DEFAULT_MODELS = [
 // config-only pull request should not dispatch it at all.
 const TEST_PATH = /(^|\/)(tests?|spec|__tests__)\/|[._-](test|spec)\.[a-z]+$|(^|\/)test_[^/]+$/i;
 
+// Java/Kotlin/Scala name a test by suffix, not separator: `FooTest.java`,
+// `BarSpec.scala`. Case-sensitive on purpose -- TEST_PATH is `/i`, and folding
+// case here would make a lowercase "test" fused inside an unrelated word (e.g.
+// `Latest.js`) match too. Requiring the capitalized suffix rules that out.
+const CONVENTIONAL_TEST_SUFFIX = /(Test|Tests|Spec|Specs)\.[A-Za-z0-9]+$/;
+
+function isTestPath(path) {
+  return TEST_PATH.test(path) || CONVENTIONAL_TEST_SUFFIX.test(path);
+}
+
 // Read the `+++ b/<path>` headers, not every `+` line: a hunk body line that
 // happens to start with "+" is content, not a filename, and matching those
 // would enable the lens on any diff that adds a line beginning with a plus.
@@ -102,7 +112,7 @@ export function diffAddsTestLines(diff) {
     if (afterMinusHeader && line.startsWith("+++ ")) {
       afterMinusHeader = false;
       const path = line.slice(4).replace(/^b\//, "").trim();
-      inTestFile = path !== "/dev/null" && TEST_PATH.test(path);
+      inTestFile = path !== "/dev/null" && isTestPath(path);
       continue;
     }
     afterMinusHeader = false;
@@ -164,6 +174,17 @@ export function selfcheckMutationRoster(buildFindingsMarkdown) {
   const codeDiff = "diff --git a/src/a.ts b/src/a.ts\n--- a/src/a.ts\n+++ b/src/a.ts\n+const x = 1;\n";
   if (diffAddsTestLines(codeDiff)) throw new Error("selfcheck: a code-only diff counted as adding tests");
   if (!diffAddsTestLines(testDiff)) throw new Error("selfcheck: a test diff did not count as adding tests");
+  // Java/Kotlin/Scala name a test by suffix, not by directory or separator.
+  if (
+    !diffAddsTestLines("--- a/src/FooTest.java\n+++ b/src/FooTest.java\n+assertEquals(1, f());\n")
+  ) {
+    throw new Error("selfcheck: a conventional *Test.java filename was not recognized as a test");
+  }
+  // A lowercase "test" fused inside an unrelated word must NOT match -- only
+  // the capitalized Test/Spec suffix does.
+  if (diffAddsTestLines("--- a/src/Latest.js\n+++ b/src/Latest.js\n+const x = 1;\n")) {
+    throw new Error("selfcheck: a filename merely containing lowercase 'test' was misclassified as a test file");
+  }
   // A test file that is only DELETED from adds nothing to review.
   if (diffAddsTestLines("--- a/tests/t.py\n+++ b/tests/t.py\n-assert f() == 1\n")) throw new Error("selfcheck: a deletion counted as adding tests");
   // The header itself starts with "+", so a naive scan of "+" lines would
