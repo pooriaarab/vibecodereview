@@ -226,11 +226,11 @@ runs:
            `gh pr review` (--approve / --request-changes / --comment).
            Your verdict describes what is STILL WRONG AFTER your own fixes, not what you
            found before them. So:
-             - You fixed every Critical you found and nothing Critical is left open:
-               --comment. Say what you found and that you fixed it.
              - A Critical is still open (you could not fix it, or chose not to):
                --request-changes, naming specifically what remains open.
-             - No findings and you pushed nothing: --approve.
+             - You found and/or fixed something (any severity) and no Critical is
+               left open: --comment. Say what you found and that you fixed it.
+             - You found nothing and pushed nothing: --approve.
            Never --approve in a run where you pushed fixes (use --comment).
            Do NOT --request-changes for a defect you repaired in this run. That blocks the
            PR on a finding that no longer exists, and nothing you are allowed to do next
