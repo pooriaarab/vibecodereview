@@ -1,0 +1,28 @@
+diff --git a/action.yml b/action.yml
+index b2d4c7d..cde91b7 100644
+--- a/action.yml
++++ b/action.yml
+@@ -223,8 +223,21 @@ runs:
+         6. Assign severity yourself (council members do not rate it): Critical (security, crash,
+            data loss), Major (real bug / convention violation), Minor (rest). Post Major+ inline,
+            roll Minor into the summary, cap ~8 inline comments. Submit ONE review with
+-           `gh pr review` (--approve / --request-changes / --comment). Use --request-changes only
+-           for Critical. Never --approve in a run where you pushed fixes (use --comment).
++           `gh pr review` (--approve / --request-changes / --comment).
++           Your verdict describes what is STILL WRONG AFTER your own fixes, not what you
++           found before them. So:
++             - A Critical is still open (you could not fix it, or chose not to):
++               --request-changes, naming specifically what remains open.
++             - You found and/or fixed something (any severity) and no Critical is
++               left open: --comment. Say what you found and that you fixed it.
++             - You found nothing and pushed nothing: --approve.
++           Never --approve in a run where you pushed fixes (use --comment).
++           Do NOT --request-changes for a defect you repaired in this run. That blocks the
++           PR on a finding that no longer exists, and nothing you are allowed to do next
++           can clear it: your fix push is authenticated with GITHUB_TOKEN, and GitHub does
++           not trigger workflows for GITHUB_TOKEN pushes, so no later run posts the
++           approval that would supersede the block. Only a human dismissing the review
++           can. See issue #43.
+         7. In the review body include a collapsible council table:
+            `<details><summary>🧑‍⚖️ Council</summary>` then a Markdown table of
+            `| Model | Lens | Result |` (confirmed / rejected / no findings), then `</details>`.

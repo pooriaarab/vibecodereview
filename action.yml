@@ -229,7 +229,9 @@ runs:
              - A Critical is still open (you could not fix it, or chose not to):
                --request-changes, naming specifically what remains open.
              - You found and/or fixed something (any severity) and no Critical is
-               left open: --comment. Say what you found and that you fixed it.
+               left open: --comment. For each finding say plainly whether you
+               fixed it or it remains open — never report an unfixed finding
+               as fixed.
              - You found nothing and pushed nothing: --approve.
            Never --approve in a run where you pushed fixes (use --comment).
            Do NOT --request-changes for a defect you repaired in this run. That blocks the
