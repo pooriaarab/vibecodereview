@@ -40,6 +40,10 @@ inputs:
     description: "If true, the chair may commit and push fixes to the PR branch."
     required: false
     default: "true"
+  require_proof:
+    description: "If true, the chair checks that the PR body's evidence matches the diff — a UI change needs before/after screenshots, a command needs its result. Set false in a repo where no change is ever visible. See pr-standards.md in pooriaarab/scripts."
+    required: false
+    default: "true"
   max_fix_cycles:
     description: "Stop auto-pushing fixes after this many of our own consecutive commits (loop guard). Each fix commit is a new `synchronize` event, so it re-runs every other pull_request workflow in the repo — budget this against how many you have. See 'What a fix cycle costs' in the README."
     required: false
@@ -198,6 +202,7 @@ runs:
         MUTATION_LENS: ${{ inputs.mutation_lens }}
         MUTATION_MODEL: ${{ inputs.mutation_model }}
         PR_CONTEXT_FILE: ${{ runner.temp }}/pr-context.txt
+        REQUIRE_PROOF: ${{ inputs.require_proof }}
       run: |
         gh pr diff ${{ github.event.pull_request.number }} > pr.diff || true
         nohup node "${{ github.action_path }}/scripts/council-review.mjs" \
@@ -265,6 +270,7 @@ runs:
         VCR_BRANCH: ${{ github.event.pull_request.head.ref }}
         VCR_CANPUSH: ${{ steps.cycle.outputs.can_push }}
         VCR_CYCLES: ${{ steps.cycle.outputs.cycles }}
+        VCR_REQUIRE_PROOF: ${{ inputs.require_proof }}
       run: |
         cat > "$RUNNER_TEMP/chair-prompt.txt" <<'VCR_PROMPT_EOF'
         You chair an LLM council reviewing PR #__PR__ in __REPO__.
@@ -290,8 +296,13 @@ runs:
         3. Repo conventions: CLAUDE.md is already loaded into your context, so do not re-read
            it. Read AGENTS.md and the `.claude/rules/` files that match the paths this diff
            touches — those only. Do not enumerate the whole rules directory.
-        4. Add your own lens: conventions + test coverage. Assume the author is competent;
-           flag only diff-introduced defects with a concrete failure trigger.
+           Read VISION.md when the repo has one: it states what this repo is for, and it is
+           the only thing that can tell you a change is well-built and still does not belong
+           here.
+        4. Add your own lenses. Assume the author is competent; flag only diff-introduced
+           defects with a concrete failure trigger.
+           - conventions and test coverage.
+           __PROOFLENS__
         5. If "Can push fixes" is true and you find clear, confirmed bugs/security/convention
            issues, fix them (Edit/Write), then:
            `git add -A && git commit -m "fix: <what>" && git push origin __BRANCH__`
@@ -336,6 +347,22 @@ runs:
         PROMPT="${PROMPT//__BRANCH__/$VCR_BRANCH}"
         PROMPT="${PROMPT//__CANPUSH__/$VCR_CANPUSH}"
         PROMPT="${PROMPT//__CYCLES__/$VCR_CYCLES}"
+        # Mirror council-config.mjs: when proof is off, drop the whole bullet
+        # rather than interpolate the flag into a still-mandatory instruction
+        # the chair could follow regardless of what the flag says.
+        if [ "${VCR_REQUIRE_PROOF:-true}" = "false" ]; then
+          PROOF_LENS="- proof: disabled for this repo (require_proof: false). Do not ask for screenshots or command results."
+        else
+          PROOF_LENS="- proof (required in this repo: true). The body's \`## How I verified\`
+             must carry evidence that matches the diff. Flag it when a UI change shows no
+             before/after screenshot, when an embedded screenshot shows a screen this diff does
+             not touch, when a named command has no result, when the evidence
+             leaves untested a code path this PR changes, when the evidence predates the
+             newest commit that touched a path it exercises, or when a
+             \`Proof: n/a\` reason does not hold. Name the capture that would settle it. Never push a proof fix: evidence is
+             the author's to produce, and a chair that invents it defeats the check."
+        fi
+        PROMPT="${PROMPT//__PROOFLENS__/$PROOF_LENS}"
         # An empty prompt is the one failure this step can produce, and it fails
         # SILENTLY downstream: claude-code-action skips and reports success, so
         # the PR gets a green review check with no review behind it. Fail here
@@ -531,6 +558,11 @@ runs:
         GITHUB_REPOSITORY: ${{ github.repository }}
         PR_NUMBER: ${{ github.event.pull_request.number }}
         CHAIR_FALLBACK_MODEL: ${{ inputs.chair_fallback_model }}
+        # The proof lens must reach every chair. Without these two the fallback
+        # reviewed without it, so a subscription outage turned proof off and the
+        # check still reported green.
+        PR_CONTEXT_FILE: ${{ runner.temp }}/pr-context.txt
+        VCR_REQUIRE_PROOF: ${{ inputs.require_proof }}
       run: node "${{ github.action_path }}/scripts/chair-fallback.mjs" pr.diff council-findings.md
 
     # A budget stop is a routing decision, not a verdict on the code, so it

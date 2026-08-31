@@ -23,16 +23,31 @@ verdict, self-healing fix.
 
 | Member | Provider (called directly) | Secret | Lens |
 | --- | --- | --- | --- |
-| Chair | Claude (subscription OAuth) | `CLAUDE_CODE_OAUTH_TOKEN` | synthesis + conventions + tests + fixes |
+| Chair | Claude (subscription OAuth) | `CLAUDE_CODE_OAUTH_TOKEN` | synthesis + conventions + tests + proof + fixes |
 | GPT / Codex | api.openai.com | `OPENAI_API_KEY` | correctness, silent failures |
 | Gemini | generativelanguage.googleapis.com | `GEMINI_API_KEY` | performance, type design |
 | Kimi | api.moonshot.ai | `MOONSHOT_API_KEY` | security |
 | Grok / DeepSeek | openrouter.ai | `OPENROUTER_API_KEY` | maintainability, data integrity |
-| GPT-5.6 (scope) | openrouter.ai | `OPENROUTER_API_KEY` | scope and atomicity |
+| GPT-5.6 (scope) | openrouter.ai | `OPENROUTER_API_KEY` | scope, atomicity, and the evidence in the body |
 | Sonnet (mutation) | openrouter.ai | `OPENROUTER_API_KEY` | can these tests fail at all — **off by default** |
 
 A member with no key drops out. No key at all → the council step is skipped, and
 Claude still reviews alone. Nothing here blocks the PR on a provider outage. The scope lens reads the PR's title, body, and linked issues from `PR_CONTEXT_FILE` when available to verify the diff matches the author's claim.
+
+A pull request also has to show its work: a visible change carries before and after
+screenshots, a command carries its result. The scope member judges that evidence against
+the diff, and the chair asks for the capture that would settle it. Neither of them ever
+produces the evidence itself. Set `require_proof: false` in a repo where no change is
+ever visible. The rule the check enforces lives in `pr-standards.md` in
+[pooriaarab/scripts](https://github.com/pooriaarab/scripts).
+
+Evidence has to cover the diff it claims to cover. The check flags a body whose
+`## How I verified` leaves untested a code path the PR changes, and one whose
+capture predates the newest commit touching a path that capture exercises. It does
+not ask for a recapture on every push: a commit that changes nothing the evidence
+shows leaves that evidence good. `scripts/proof-gate.test.sh` pins both paths the
+`require_proof` flag travels — the council scope lens and the chair's own bullet —
+because the first version gated only one of them.
 
 ## Use it in a repo
 

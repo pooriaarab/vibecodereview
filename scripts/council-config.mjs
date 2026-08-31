@@ -28,7 +28,15 @@ export const LENSES = {
   mutation:
     "whether the tests in this diff can fail at all. For EACH test added or changed, name ONE concrete mutation to the NON-TEST code it covers that the test must catch. Write every finding as `<test path:line> -- <mutation path:line> -- replace <before> with <after>`. Without the test's own location the chair cannot tell which test the mutation is supposed to break, and cannot check the claim. Report a finding only when the test would still pass after that mutation, or when it asserts something the code cannot get wrong: the test and the code share the same helper so they agree regardless, the assertion restates the implementation, the fixture never reaches the code path, or a value is compared against itself. Also report a test that can only fail by hanging or by timing out, since in CI that is a job timeout rather than a red. Do NOT report missing coverage in general, and do NOT report bugs, performance, security or style (other members cover those)",
   scope:
-    "scope and atomicity: the diff doing more than one thing (a fix plus a refactor plus a rename), changes with no connection to the stated purpose of the PR, opportunistic edits to files the stated change did not require, or a stated purpose the diff does not actually accomplish. Do NOT report bugs, performance, security, or style (other members cover those).",
+    "scope and atomicity: the diff doing more than one thing (a fix plus a refactor plus a rename), changes with no connection to the stated purpose of the PR, opportunistic edits to files the stated change did not require, or a stated purpose the diff does not actually accomplish." +
+    // Evidence lives in the PR body, which this member already receives as
+    // context, so it costs nothing to judge here. A repo where no change is
+    // ever visible sets REQUIRE_PROOF=false and drops the clause rather than
+    // collecting findings its author can never satisfy.
+    (process.env.REQUIRE_PROOF === "false"
+      ? ""
+      : " ALSO judge the evidence in the body: a visible change with no before/after screenshot, an embedded screenshot of a screen this diff does not touch, a named command with no result, evidence that leaves untested a code path this PR changes or that predates the newest commit touching a path it exercises, or a `Proof: n/a` reason that does not hold.") +
+    " Do NOT report bugs, performance, security, or style (other members cover those).",
 };
 
 // A native provider key that is present but out of credit answers in well under
