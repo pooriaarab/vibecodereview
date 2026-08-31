@@ -199,7 +199,10 @@ runs:
         # Patterns are anchored to the workspace root (leading `/`) so a
         # legitimately named file elsewhere in the tree, e.g. tests/probe.js
         # or docs/pr.diff, is not silently excluded from the chair's commit.
-        printf '%s\n' /pr.diff /council-findings.md /council.log /council.pid '/probe.*' \
+        # Listed exactly (no `probe.*` glob) so a legitimately named
+        # `probe.<ext>` file elsewhere at the root is never swallowed.
+        printf '%s\n' /pr.diff /council-findings.md /council.log /council.pid \
+          /probe.1 /probe.2 /probe.3 /reason.1 /reason.2 /reason.3 \
           >> "$(git rev-parse --git-dir)/info/exclude"
         gh pr diff ${{ github.event.pull_request.number }} > pr.diff || true
         nohup node "${{ github.action_path }}/scripts/council-review.mjs" \
