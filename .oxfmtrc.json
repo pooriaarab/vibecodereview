@@ -1,0 +1,26 @@
+{
+  "$schema": "https://unpkg.com/oxfmt@0.65.0/configuration_schema.json",
+  "ignorePatterns": [
+    "**/vendor/**",
+    "**/third_party/**",
+    "**/generated/**",
+    "**/*.generated.*",
+    "**/*.min.js",
+    "**/*.min.css",
+    "**/*.bundle.js",
+    "**/dist/**",
+    "**/build/**",
+    "**/.next/**",
+    "**/.wrangler/**",
+    "**/.open-next/**",
+    "**/coverage/**",
+    "**/*.html",
+    "**/*.md",
+    "**/*.mdx",
+    "**/*.json",
+    "**/*.jsonc",
+    "**/*.yml",
+    "**/*.yaml",
+    "**/*.css"
+  ]
+}

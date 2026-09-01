@@ -51,7 +51,10 @@ function callTool(id, params) {
     const text = runCouncil(params?.arguments?.diff);
     return reply(id, { content: [{ type: "text", text }] });
   } catch (err) {
-    return reply(id, { content: [{ type: "text", text: `Council error: ${err?.message || err}` }], isError: true });
+    return reply(id, {
+      content: [{ type: "text", text: `Council error: ${err?.message || err}` }],
+      isError: true,
+    });
   }
 }
 
