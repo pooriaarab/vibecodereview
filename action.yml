@@ -894,10 +894,25 @@ runs:
         [ "$claimed" = none ] && [ "$Q" = "success" ] && claimed="fourth"
         [ "$claimed" = none ] && [ "$F" = "success" ] && claimed="fallback"
 
-        posted=$(gh api "repos/$VCR_REPO/pulls/$VCR_PR/reviews" --paginate \
-          --jq "[.[] | select(.submitted_at >= \"$STARTED_AT\")] | length" 2>/dev/null || echo 0)
+        # `--jq` runs once per page under `--paginate`, so on a PR with more
+        # than one page of reviews this printed one number per page and
+        # `-gt` blew up on the multi-line result. Piping the raw pages into
+        # `jq -s` (the pattern already used above for the budget comment
+        # lookup) slurps every page into one array before counting.
+        #
+        # Login is checked too: without it, any human or unrelated bot review
+        # (e.g. coderabbitai[bot], which reviews this very PR) posted after
+        # STARTED_AT satisfies the gate even when every chair failed to post.
+        # "claude[bot]" covers the four Claude Code Action chairs; the
+        # OpenRouter fallback posts through `gh pr review` with
+        # `inputs.github_token`, documented above as the caller's
+        # `github.token`, which GitHub always attributes to
+        # "github-actions[bot]".
+        posted=$(gh api "repos/$VCR_REPO/pulls/$VCR_PR/reviews" --paginate 2>/dev/null \
+          | jq -s "[.[][] | select(.submitted_at >= \"$STARTED_AT\" and (.user.login == \"claude[bot]\" or .user.login == \"github-actions[bot]\"))] | length" 2>/dev/null)
+        posted="${posted:-0}"
 
-        if [ "${posted:-0}" -gt 0 ]; then
+        if [ "$posted" -gt 0 ]; then
           echo "chair: $claimed posted $posted review(s) this run"
           exit 0
         fi

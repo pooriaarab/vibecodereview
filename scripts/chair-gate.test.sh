@@ -23,17 +23,30 @@ gate = next(s for s in steps if s.get("name") == "Chair result gate")
 open(sys.argv[2], "w").write(gate["run"])
 PY
 
-# Stand in for the reviews query. REVIEWS_POSTED is what the real API would
-# return for reviews submitted since this run started.
+# Stand in for the reviews query. REVIEWS_JSON is a JSON array of review
+# objects, each shaped like the real API (`submitted_at`, `user.login`); the
+# stub hands them back one per page, exactly like real `--paginate` output,
+# so the gate's own `jq -s` pipeline does the flattening, time filter, and
+# login filter for real instead of a preset count standing in for the result.
+# It also checks the invocation shape, so dropping `--paginate` or pointing
+# at the wrong endpoint fails loudly instead of the stub answering anyway.
 mkdir -p "$WORK/bin"
 cat > "$WORK/bin/gh" <<'GH'
 #!/usr/bin/env bash
-echo "${REVIEWS_POSTED:-0}"
+case "$*" in
+  *"/reviews"*"--paginate"*) ;;
+  *) echo "unexpected gh invocation: $*" >&2; exit 1 ;;
+esac
+python3 -c '
+import json, os
+for r in json.loads(os.environ.get("REVIEWS_JSON", "[]")):
+    print(json.dumps([r]))
+'
 GH
 chmod +x "$WORK/bin/gh"
 export PATH="$WORK/bin:$PATH"
 
-export VCR_PR=1 VCR_REPO=owner/repo STARTED_AT=2026-01-01T00:00:00Z
+export VCR_PR=1 VCR_REPO=owner/repo STARTED_AT=2026-01-01T12:00:00Z
 export TOKEN_1=live TOKEN_2=live TOKEN_3=live TOKEN_4=live
 
 fails=0
@@ -48,29 +61,53 @@ check() {
   fi
 }
 
+claude_review() { printf '{"submitted_at":"%s","user":{"login":"claude[bot]"}}' "${1:-2026-01-01T13:00:00Z}"; }
+fallback_review() { printf '{"submitted_at":"%s","user":{"login":"github-actions[bot]"}}' "${1:-2026-01-01T13:00:00Z}"; }
+unrelated_review() { printf '{"submitted_at":"%s","user":{"login":"coderabbitai[bot]"}}' "${1:-2026-01-01T13:00:00Z}"; }
+
 # The shipped bug. A step succeeded, nothing was posted, the check went green.
-OVER_BUDGET=false P=success B=skipped T=skipped Q=skipped F=skipped REVIEWS_POSTED=0 \
+OVER_BUDGET=false P=success B=skipped T=skipped Q=skipped F=skipped REVIEWS_JSON='[]' \
   check 1 'a step that exits 0 without posting fails the gate'
 
-OVER_BUDGET=false P=success B=skipped T=skipped Q=skipped F=skipped REVIEWS_POSTED=1 \
+OVER_BUDGET=false P=success B=skipped T=skipped Q=skipped F=skipped REVIEWS_JSON="[$(claude_review)]" \
   check 0 'a posted review passes'
 
 # Failover still works: any chair may fail as long as something posted.
-OVER_BUDGET=false P=failure B=success T=skipped Q=skipped F=skipped REVIEWS_POSTED=1 \
+OVER_BUDGET=false P=failure B=success T=skipped Q=skipped F=skipped REVIEWS_JSON="[$(claude_review)]" \
   check 0 'the backup token posting passes'
-OVER_BUDGET=false P=failure B=failure T=success Q=skipped F=skipped REVIEWS_POSTED=1 \
+OVER_BUDGET=false P=failure B=failure T=success Q=skipped F=skipped REVIEWS_JSON="[$(claude_review)]" \
   check 0 'the third token posting passes'
-OVER_BUDGET=false P=failure B=failure T=failure Q=success F=skipped REVIEWS_POSTED=1 \
+OVER_BUDGET=false P=failure B=failure T=failure Q=success F=skipped REVIEWS_JSON="[$(claude_review)]" \
   check 0 'the fourth token posting passes'
-OVER_BUDGET=false P=failure B=failure T=failure Q=failure F=success REVIEWS_POSTED=1 \
-  check 0 'the OpenRouter fallback posting passes'
+OVER_BUDGET=false P=failure B=failure T=failure Q=failure F=success REVIEWS_JSON="[$(fallback_review)]" \
+  check 0 'the OpenRouter fallback posting under github-actions[bot] passes'
 
-OVER_BUDGET=false P=failure B=failure T=failure Q=failure F=failure REVIEWS_POSTED=0 \
+OVER_BUDGET=false P=failure B=failure T=failure Q=failure F=failure REVIEWS_JSON='[]' \
   check 1 'every chair failing fails the gate'
+
+# A review that predates this run does not count -- it is evidence of a past
+# cycle, not this one.
+OVER_BUDGET=false P=failure B=failure T=skipped Q=skipped F=skipped \
+  REVIEWS_JSON="[$(claude_review 2026-01-01T11:00:00Z)]" \
+  check 1 'a review submitted before this run started does not count'
+
+# The bug this file exists to catch: every chair failed, but an unrelated
+# bot (coderabbitai reviews this very repo's PRs) commented on the pull
+# request while the run was in flight. Counting it would report success for
+# a run that posted nothing.
+OVER_BUDGET=false P=failure B=failure T=failure Q=failure F=failure REVIEWS_JSON="[$(unrelated_review)]" \
+  check 1 'an unrelated bot review after this run started does not count'
+
+# Real pagination: three reviews returned as three separate pages, only the
+# last one qualifying. If `--jq` ran per page instead of over the slurped
+# whole, `-gt` would choke on a multi-line count.
+OVER_BUDGET=false P=failure B=failure T=failure Q=failure F=success \
+  REVIEWS_JSON="[$(unrelated_review 2026-01-01T10:00:00Z), $(claude_review 2026-01-01T11:30:00Z), $(fallback_review)]" \
+  check 0 'a qualifying review counts even split across multiple pages'
 
 # Over budget is a routing decision, not a verdict on the code, so it passes
 # without a review. Failing here would hide a real failure behind a cost stop.
-OVER_BUDGET=true P=skipped B=skipped T=skipped Q=skipped F=skipped REVIEWS_POSTED=0 \
+OVER_BUDGET=true P=skipped B=skipped T=skipped Q=skipped F=skipped REVIEWS_JSON='[]' \
   check 0 'an over-budget run passes without a review'
 
 [ "$fails" = 0 ] || { printf '\n%s failing\n' "$fails" >&2; exit 1; }
