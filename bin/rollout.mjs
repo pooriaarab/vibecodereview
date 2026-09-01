@@ -26,73 +26,73 @@
  * repos whose default branch already has the workflow.
  */
 
-import { execFileSync } from 'node:child_process';
+import { execFileSync } from "node:child_process";
 
 const SECRET_NAMES = [
-  'CLAUDE_CODE_OAUTH_TOKEN',
+  "CLAUDE_CODE_OAUTH_TOKEN",
   // The failover tokens. Leaving these out of the roster meant a rollout
   // wrote a workflow that could only ever use ONE subscription, so the whole
   // fleet went down together the moment that one capped out.
-  'CLAUDE_CODE_OAUTH_TOKEN_2',
-  'CLAUDE_CODE_OAUTH_TOKEN_3',
-  'OPENAI_API_KEY',
-  'GEMINI_API_KEY',
-  'MOONSHOT_API_KEY',
-  'OPENROUTER_API_KEY',
+  "CLAUDE_CODE_OAUTH_TOKEN_2",
+  "CLAUDE_CODE_OAUTH_TOKEN_3",
+  "OPENAI_API_KEY",
+  "GEMINI_API_KEY",
+  "MOONSHOT_API_KEY",
+  "OPENROUTER_API_KEY",
 ];
 
-const WORKFLOW_PATH = '.github/workflows/vibecodereview.yml';
-const BRANCH = 'add-vibecodereview';
-const COMMIT_MESSAGE = 'Add vibecodereview council PR review';
-const PR_TITLE = 'Add vibecodereview council PR review';
+const WORKFLOW_PATH = ".github/workflows/vibecodereview.yml";
+const BRANCH = "add-vibecodereview";
+const COMMIT_MESSAGE = "Add vibecodereview council PR review";
+const PR_TITLE = "Add vibecodereview council PR review";
 const PR_BODY =
-  'Adds owner-gated LLM-council PR review (pooriaarab/vibecodereview@v1). ' +
-  'Set secrets are handled separately. Review before merge.';
+  "Adds owner-gated LLM-council PR review (pooriaarab/vibecodereview@v1). " +
+  "Set secrets are handled separately. Review before merge.";
 
 // The `${{ ... }}` sequences are literal GitHub Actions syntax. They sit in
 // plain JS strings, so JS never evaluates them. Do not convert to a template
 // literal.
 const WORKFLOW_YAML =
   [
-    'name: vibecodereview',
-    'on:',
-    '  pull_request:',
-    '    types: [opened, synchronize, review_requested]',
+    "name: vibecodereview",
+    "on:",
+    "  pull_request:",
+    "    types: [opened, synchronize, review_requested]",
     '    paths-ignore: ["**.md", "docs/**"]',
-    'concurrency:',
-    '  group: vibecodereview-${{ github.event.pull_request.number }}',
-    '  cancel-in-progress: true',
-    'jobs:',
-    '  review:',
+    "concurrency:",
+    "  group: vibecodereview-${{ github.event.pull_request.number }}",
+    "  cancel-in-progress: true",
+    "jobs:",
+    "  review:",
     "    # Only review the repo owner's own PRs (cost + injection guard on public repos).",
-    '    if: github.event.pull_request.user.login == github.repository_owner',
-    '    runs-on: ubuntu-latest',
-    '    timeout-minutes: 30',
-    '    permissions:',
-    '      contents: write',
-    '      pull-requests: write',
-    '      id-token: write',
-    '    steps:',
-    '      - uses: pooriaarab/vibecodereview@v1',
-    '        with:',
-    '          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}',
-    '          claude_code_oauth_token_2: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN_2 }}',
-    '          claude_code_oauth_token_3: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN_3 }}',
-    '          github_token: ${{ github.token }}',
-    '          openai_api_key: ${{ secrets.OPENAI_API_KEY }}',
-    '          gemini_api_key: ${{ secrets.GEMINI_API_KEY }}',
-    '          moonshot_api_key: ${{ secrets.MOONSHOT_API_KEY }}',
-    '          openrouter_api_key: ${{ secrets.OPENROUTER_API_KEY }}',
-  ].join('\n') + '\n';
+    "    if: github.event.pull_request.user.login == github.repository_owner",
+    "    runs-on: ubuntu-latest",
+    "    timeout-minutes: 30",
+    "    permissions:",
+    "      contents: write",
+    "      pull-requests: write",
+    "      id-token: write",
+    "    steps:",
+    "      - uses: pooriaarab/vibecodereview@v1",
+    "        with:",
+    "          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}",
+    "          claude_code_oauth_token_2: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN_2 }}",
+    "          claude_code_oauth_token_3: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN_3 }}",
+    "          github_token: ${{ github.token }}",
+    "          openai_api_key: ${{ secrets.OPENAI_API_KEY }}",
+    "          gemini_api_key: ${{ secrets.GEMINI_API_KEY }}",
+    "          moonshot_api_key: ${{ secrets.MOONSHOT_API_KEY }}",
+    "          openrouter_api_key: ${{ secrets.OPENROUTER_API_KEY }}",
+  ].join("\n") + "\n";
 
 function stderrOf(err) {
-  return String(err.stderr || '').trim() || String(err.code || 'unknown error');
+  return String(err.stderr || "").trim() || String(err.code || "unknown error");
 }
 
 function gh(args) {
-  return execFileSync('gh', args, {
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'pipe'],
+  return execFileSync("gh", args, {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
     maxBuffer: 16 * 1024 * 1024,
   });
 }
@@ -121,14 +121,14 @@ function setSecrets(repo, log, dryRun) {
     // Do not rethrow the raw error: execFileSync error messages quote the
     // full command line, which would leak the secret.
     try {
-      gh(['secret', 'set', name, '--repo', repo, '--body', value]);
+      gh(["secret", "set", name, "--repo", repo, "--body", value]);
     } catch (err) {
       throw new Error(`gh secret set ${name} failed: ${stderrOf(err)}`);
     }
     log(`secret ${name} set`);
   }
   if (!process.env.CLAUDE_CODE_OAUTH_TOKEN) {
-    log('WARNING: CLAUDE_CODE_OAUTH_TOKEN is empty; the chair reviewer will fail without it');
+    log("WARNING: CLAUDE_CODE_OAUTH_TOKEN is empty; the chair reviewer will fail without it");
   }
 }
 
@@ -138,9 +138,9 @@ function workflowExists(repo, log, dryRun) {
     log(`[dry-run] would run: gh api repos/${repo}/contents/${WORKFLOW_PATH}`);
     return false;
   }
-  const check = tryGh(['api', `repos/${repo}/contents/${WORKFLOW_PATH}`]);
+  const check = tryGh(["api", `repos/${repo}/contents/${WORKFLOW_PATH}`]);
   if (check.ok) {
-    log('workflow exists, skipping PR');
+    log("workflow exists, skipping PR");
     return true;
   }
   return false;
@@ -150,10 +150,20 @@ function resolveHead(repo, log, dryRun) {
   // 3a. Default branch.
   let defaultBranch;
   if (dryRun) {
-    log(`[dry-run] would run: gh repo view ${repo} --json defaultBranchRef --jq .defaultBranchRef.name`);
-    defaultBranch = '<default>';
+    log(
+      `[dry-run] would run: gh repo view ${repo} --json defaultBranchRef --jq .defaultBranchRef.name`,
+    );
+    defaultBranch = "<default>";
   } else {
-    defaultBranch = gh(['repo', 'view', repo, '--json', 'defaultBranchRef', '--jq', '.defaultBranchRef.name']).trim();
+    defaultBranch = gh([
+      "repo",
+      "view",
+      repo,
+      "--json",
+      "defaultBranchRef",
+      "--jq",
+      ".defaultBranchRef.name",
+    ]).trim();
     log(`default branch: ${defaultBranch}`);
   }
 
@@ -161,9 +171,9 @@ function resolveHead(repo, log, dryRun) {
   let sha;
   if (dryRun) {
     log(`[dry-run] would run: gh api repos/${repo}/git/ref/heads/<default> --jq .object.sha`);
-    sha = '<sha>';
+    sha = "<sha>";
   } else {
-    sha = gh(['api', `repos/${repo}/git/ref/heads/${defaultBranch}`, '--jq', '.object.sha']).trim();
+    sha = gh(["api", `repos/${repo}/git/ref/heads/${defaultBranch}`, "--jq", ".object.sha"]).trim();
   }
   return { defaultBranch, sha };
 }
@@ -171,12 +181,19 @@ function resolveHead(repo, log, dryRun) {
 function ensureBranch(repo, log, dryRun, sha) {
   // 3c. Create the scratch branch (reuse it if it already exists).
   if (dryRun) {
-    log(`[dry-run] would run: gh api --method POST repos/${repo}/git/refs -f ref=refs/heads/${BRANCH} -f sha=<sha>`);
+    log(
+      `[dry-run] would run: gh api --method POST repos/${repo}/git/refs -f ref=refs/heads/${BRANCH} -f sha=<sha>`,
+    );
   } else {
     const res = tryGh([
-      'api', '--method', 'POST', `repos/${repo}/git/refs`,
-      '-f', `ref=refs/heads/${BRANCH}`,
-      '-f', `sha=${sha}`,
+      "api",
+      "--method",
+      "POST",
+      `repos/${repo}/git/refs`,
+      "-f",
+      `ref=refs/heads/${BRANCH}`,
+      "-f",
+      `sha=${sha}`,
     ]);
     if (res.ok) {
       log(`branch ${BRANCH} created`);
@@ -190,20 +207,33 @@ function ensureBranch(repo, log, dryRun, sha) {
 
 function writeWorkflowFile(repo, log, dryRun) {
   // 3d. Write the workflow file on the scratch branch.
-  const contentB64 = Buffer.from(WORKFLOW_YAML).toString('base64');
+  const contentB64 = Buffer.from(WORKFLOW_YAML).toString("base64");
   if (dryRun) {
-    log(`[dry-run] would run: gh api --method PUT repos/${repo}/contents/${WORKFLOW_PATH} -f message="${COMMIT_MESSAGE}" -f branch=${BRANCH} -f content=<BASE64>`);
+    log(
+      `[dry-run] would run: gh api --method PUT repos/${repo}/contents/${WORKFLOW_PATH} -f message="${COMMIT_MESSAGE}" -f branch=${BRANCH} -f content=<BASE64>`,
+    );
   } else {
     const putArgs = [
-      'api', '--method', 'PUT', `repos/${repo}/contents/${WORKFLOW_PATH}`,
-      '-f', `message=${COMMIT_MESSAGE}`,
-      '-f', `branch=${BRANCH}`,
-      '-f', `content=${contentB64}`,
+      "api",
+      "--method",
+      "PUT",
+      `repos/${repo}/contents/${WORKFLOW_PATH}`,
+      "-f",
+      `message=${COMMIT_MESSAGE}`,
+      "-f",
+      `branch=${BRANCH}`,
+      "-f",
+      `content=${contentB64}`,
     ];
     // Re-runs: if the file already exists on the scratch branch, the Contents
     // API needs its current sha to update it.
-    const existing = tryGh(['api', `repos/${repo}/contents/${WORKFLOW_PATH}?ref=${BRANCH}`, '--jq', '.sha']);
-    if (existing.ok) putArgs.push('-f', `sha=${existing.stdout.trim()}`);
+    const existing = tryGh([
+      "api",
+      `repos/${repo}/contents/${WORKFLOW_PATH}?ref=${BRANCH}`,
+      "--jq",
+      ".sha",
+    ]);
+    if (existing.ok) putArgs.push("-f", `sha=${existing.stdout.trim()}`);
     gh(putArgs);
     log(`workflow file written to branch ${BRANCH}`);
   }
@@ -212,21 +242,32 @@ function writeWorkflowFile(repo, log, dryRun) {
 function openPr(repo, log, dryRun, defaultBranch) {
   // 3e. Open the PR.
   if (dryRun) {
-    log(`[dry-run] would run: gh pr create --repo ${repo} --base <default> --head ${BRANCH} --title "${PR_TITLE}" --body "${PR_BODY}"`);
-    return 'dry-run';
+    log(
+      `[dry-run] would run: gh pr create --repo ${repo} --base <default> --head ${BRANCH} --title "${PR_TITLE}" --body "${PR_BODY}"`,
+    );
+    return "dry-run";
   }
   const pr = tryGh([
-    'pr', 'create', '--repo', repo,
-    '--base', defaultBranch, '--head', BRANCH,
-    '--title', PR_TITLE, '--body', PR_BODY,
+    "pr",
+    "create",
+    "--repo",
+    repo,
+    "--base",
+    defaultBranch,
+    "--head",
+    BRANCH,
+    "--title",
+    PR_TITLE,
+    "--body",
+    PR_BODY,
   ]);
   if (pr.ok) {
     log(`PR opened: ${pr.stdout.trim()}`);
-    return 'PR opened';
+    return "PR opened";
   }
   if (/already exists/i.test(pr.stderr)) {
-    log('PR already exists, nothing to do');
-    return 'PR already exists';
+    log("PR already exists, nothing to do");
+    return "PR already exists";
   }
   throw new Error(`gh pr create failed: ${pr.stderr}`);
 }
@@ -234,7 +275,7 @@ function openPr(repo, log, dryRun, defaultBranch) {
 function processRepo(repo, log, dryRun) {
   setSecrets(repo, log, dryRun);
   if (workflowExists(repo, log, dryRun)) {
-    return 'skipped (workflow exists)';
+    return "skipped (workflow exists)";
   }
   const { defaultBranch, sha } = resolveHead(repo, log, dryRun);
   ensureBranch(repo, log, dryRun, sha);
@@ -243,25 +284,25 @@ function processRepo(repo, log, dryRun) {
 }
 
 function collectRepos(argv) {
-  const dryRun = argv.includes('--dry-run');
-  const argvRepos = argv.filter((a) => a !== '--dry-run');
+  const dryRun = argv.includes("--dry-run");
+  const argvRepos = argv.filter((a) => a !== "--dry-run");
 
-  const unknownFlags = argvRepos.filter((a) => a.startsWith('-'));
+  const unknownFlags = argvRepos.filter((a) => a.startsWith("-"));
   if (unknownFlags.length) {
-    console.error(`error: unknown flag(s): ${unknownFlags.join(', ')}`);
+    console.error(`error: unknown flag(s): ${unknownFlags.join(", ")}`);
     process.exit(1);
   }
 
-  const envRepos = (process.env.REPOS || '')
-    .split(',')
+  const envRepos = (process.env.REPOS || "")
+    .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
   // argv repos win when both sources are given.
   const repos = [...new Set(argvRepos.length ? argvRepos : envRepos)];
 
   if (!repos.length) {
-    console.error('usage: node rollout.mjs [--dry-run] <owner/repo> [<owner/repo> ...]');
-    console.error('       or:   REPOS=owner/repo,owner/repo2 node rollout.mjs [--dry-run]');
+    console.error("usage: node rollout.mjs [--dry-run] <owner/repo> [<owner/repo> ...]");
+    console.error("       or:   REPOS=owner/repo,owner/repo2 node rollout.mjs [--dry-run]");
     process.exit(1);
   }
   for (const repo of repos) {
@@ -272,9 +313,11 @@ function collectRepos(argv) {
   }
 
   if (!dryRun) {
-    const ghOk = tryGh(['--version']);
+    const ghOk = tryGh(["--version"]);
     if (!ghOk.ok) {
-      console.error('error: `gh` CLI not found or not working. Install it and run `gh auth login` first.');
+      console.error(
+        "error: `gh` CLI not found or not working. Install it and run `gh auth login` first.",
+      );
       process.exit(1);
     }
   }
@@ -294,13 +337,13 @@ function runAll(repos, dryRun) {
       log(`ERROR: ${err.message}`);
     }
     summary.push({ repo, status });
-    console.log('');
+    console.log("");
   }
   return summary;
 }
 
 function printSummary(summary) {
-  console.log('Summary:');
+  console.log("Summary:");
   for (const { repo, status } of summary) {
     console.log(`  ${repo}: ${status}`);
   }
@@ -308,9 +351,9 @@ function printSummary(summary) {
 
 function main() {
   const argv = process.argv.slice(2);
-  const dryRun = argv.includes('--dry-run');
+  const dryRun = argv.includes("--dry-run");
   const repos = collectRepos(argv);
-  if (dryRun) console.log('[dry-run] no changes will be made\n');
+  if (dryRun) console.log("[dry-run] no changes will be made\n");
   const summary = runAll(repos, dryRun);
   printSummary(summary);
 }
