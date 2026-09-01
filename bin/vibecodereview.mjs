@@ -19,7 +19,12 @@ import os from "node:os";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, "..");
-const PROVIDER_KEYS = ["OPENAI_API_KEY", "GEMINI_API_KEY", "MOONSHOT_API_KEY", "OPENROUTER_API_KEY"];
+const PROVIDER_KEYS = [
+  "OPENAI_API_KEY",
+  "GEMINI_API_KEY",
+  "MOONSHOT_API_KEY",
+  "OPENROUTER_API_KEY",
+];
 const REF = "pooriaarab/vibecodereview@v1"; // action ref repos pin to
 
 const WORKFLOW = `name: vibecodereview
@@ -78,9 +83,12 @@ function secrets() {
 
 function doctor() {
   console.log("Chair:");
-  console.log(`  CLAUDE_CODE_OAUTH_TOKEN  ${process.env.CLAUDE_CODE_OAUTH_TOKEN ? "set" : "MISSING (required for CI)"}`);
+  console.log(
+    `  CLAUDE_CODE_OAUTH_TOKEN  ${process.env.CLAUDE_CODE_OAUTH_TOKEN ? "set" : "MISSING (required for CI)"}`,
+  );
   console.log("Council members:");
-  for (const k of PROVIDER_KEYS) console.log(`  ${k.padEnd(22)} ${process.env[k] ? "set" : "not set (member dropped)"}`);
+  for (const k of PROVIDER_KEYS)
+    console.log(`  ${k.padEnd(22)} ${process.env[k] ? "set" : "not set (member dropped)"}`);
 }
 
 function review() {
@@ -93,7 +101,9 @@ function review() {
   const tmp = path.join(os.tmpdir(), `vibecodereview-${process.pid}.diff`);
   const out = path.join(os.tmpdir(), `vibecodereview-${process.pid}.md`);
   fs.writeFileSync(tmp, diff);
-  sh("node", [path.join(ROOT, "scripts", "council-review.mjs"), tmp, out], { stdio: ["ignore", "inherit", "inherit"] });
+  sh("node", [path.join(ROOT, "scripts", "council-review.mjs"), tmp, out], {
+    stdio: ["ignore", "inherit", "inherit"],
+  });
   console.log("\n" + fs.readFileSync(out, "utf8"));
 }
 
@@ -114,7 +124,9 @@ function reviewOnePr(repo, number, post) {
   const tmp = path.join(os.tmpdir(), `vibecodereview-${process.pid}-${seq}.diff`);
   const out = path.join(os.tmpdir(), `vibecodereview-${process.pid}-${seq}.md`);
   fs.writeFileSync(tmp, diff);
-  sh("node", [path.join(ROOT, "scripts", "council-review.mjs"), tmp, out], { stdio: ["ignore", "inherit", "inherit"] });
+  sh("node", [path.join(ROOT, "scripts", "council-review.mjs"), tmp, out], {
+    stdio: ["ignore", "inherit", "inherit"],
+  });
   console.log(`\n=== ${repo}#${number} ===\n`);
   console.log(fs.readFileSync(out, "utf8"));
   if (post) sh("gh", ["pr", "comment", String(number), "--repo", repo, "--body-file", out]);
@@ -123,7 +135,9 @@ function reviewOnePr(repo, number, post) {
 function reviewRepoPrs(repo, post, counts) {
   let prs;
   try {
-    prs = JSON.parse(sh("gh", ["pr", "list", "--repo", repo, "--state", "open", "--json", "number"]));
+    prs = JSON.parse(
+      sh("gh", ["pr", "list", "--repo", repo, "--state", "open", "--json", "number"]),
+    );
   } catch (err) {
     counts.errors++;
     console.error(`${repo}: failed to list PRs: ${err?.message || err}`);
@@ -144,7 +158,9 @@ function reviewPrs() {
   const post = process.argv.includes("--post");
   const repos = parseRepoArgs(process.argv.slice(3));
   if (repos.length === 0) {
-    console.log("Usage: vibecodereview review-prs [--post] [--repo <owner/repo>]... [<owner/repo>...]");
+    console.log(
+      "Usage: vibecodereview review-prs [--post] [--repo <owner/repo>]... [<owner/repo>...]",
+    );
     return;
   }
   const counts = { reviewed: 0, errors: 0 };
@@ -161,7 +177,9 @@ try {
   else if (cmd === "review") review();
   else if (cmd === "review-prs") reviewPrs();
   else {
-    console.log("vibecodereview <init|review|review-prs|doctor|secrets>  (see `vibecodereview` header comment)");
+    console.log(
+      "vibecodereview <init|review|review-prs|doctor|secrets>  (see `vibecodereview` header comment)",
+    );
     process.exit(cmd ? 1 : 0);
   }
 } catch (err) {
