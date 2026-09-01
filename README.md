@@ -49,6 +49,20 @@ shows leaves that evidence good. `scripts/proof-gate.test.sh` pins both paths th
 `require_proof` flag travels — the council scope lens and the chair's own bullet —
 because the first version gated only one of them.
 
+The chair also reads the PR against the fleet standard when the repo carries
+`.github/pr-standards.json`: branch and title shape, exactly one `Closes #N`, a
+`## How I verified` that names a command and its result, and the hard caps of 500 counted
+lines and 40 counted files. Being over a cap is reported, never "fixed" — the chair names
+the split it would make and leaves the work alone, because deleting code to fit a cap is
+worse than a large PR.
+
+**The chair never signs its commits with a model name.** Its fix commits carry no
+`Co-Authored-By:` trailer, because the same standard rejects model attribution in commit
+messages: a repo enforcing `pr-standards` would fail its own review bot, and the PR could
+not merge until a human squashed the bot's commit away. That happened twice in
+[pooriaarab/scripts](https://github.com/pooriaarab/scripts) before this was fixed.
+Attribution belongs in the PR body as `Assisted-by:`, written by the author.
+
 ## Use it in a repo
 
 ```bash
