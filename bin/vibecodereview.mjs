@@ -8,8 +8,9 @@
 //   vibecodereview doctor               Show which provider keys are set in the environment.
 //   vibecodereview secrets [--repo o/r] Print the gh commands to set the required repo secrets.
 //
-// Provider keys (env or repo secrets): CLAUDE_CODE_OAUTH_TOKEN (chair, required for CI),
-//   OPENAI_API_KEY, GEMINI_API_KEY, MOONSHOT_API_KEY, OPENROUTER_API_KEY (council members).
+// Provider keys (env or repo secrets): CLAUDE_CODE_OAUTH_TOKEN through _4
+//   (chair failover), OPENAI_API_KEY, GEMINI_API_KEY, MOONSHOT_API_KEY, and
+//   OPENROUTER_API_KEY (council members).
 
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
@@ -45,6 +46,7 @@ jobs:
           claude_code_oauth_token: \${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           claude_code_oauth_token_2: \${{ secrets.CLAUDE_CODE_OAUTH_TOKEN_2 }}
           claude_code_oauth_token_3: \${{ secrets.CLAUDE_CODE_OAUTH_TOKEN_3 }}
+          claude_code_oauth_token_4: \${{ secrets.CLAUDE_CODE_OAUTH_TOKEN_4 }}
           github_token: \${{ github.token }}
           openai_api_key: \${{ secrets.OPENAI_API_KEY }}
           gemini_api_key: \${{ secrets.GEMINI_API_KEY }}
@@ -73,12 +75,19 @@ function secrets() {
   const repo = arg("repo", "<owner>/<repo>");
   console.log(`# Set on a PRIVATE repo only. Rotate any key you paste in a chat.`);
   console.log(`gh secret set CLAUDE_CODE_OAUTH_TOKEN --repo ${repo}   # required — chair model`);
+  for (const slot of [2, 3, 4]) {
+    console.log(`gh secret set CLAUDE_CODE_OAUTH_TOKEN_${slot} --repo ${repo}   # optional chair failover`);
+  }
   for (const k of PROVIDER_KEYS) console.log(`gh secret set ${k} --repo ${repo}`);
 }
 
 function doctor() {
   console.log("Chair:");
   console.log(`  CLAUDE_CODE_OAUTH_TOKEN  ${process.env.CLAUDE_CODE_OAUTH_TOKEN ? "set" : "MISSING (required for CI)"}`);
+  for (const slot of [2, 3, 4]) {
+    const key = `CLAUDE_CODE_OAUTH_TOKEN_${slot}`;
+    console.log(`  ${key.padEnd(24)} ${process.env[key] ? "set" : "not set (failover disabled)"}`);
+  }
   console.log("Council members:");
   for (const k of PROVIDER_KEYS) console.log(`  ${k.padEnd(22)} ${process.env[k] ? "set" : "not set (member dropped)"}`);
 }
