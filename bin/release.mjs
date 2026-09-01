@@ -111,7 +111,11 @@ if (highest && cmp(newVer, highest) <= 0) {
 }
 
 console.log(`main      ${sha}`);
-console.log(tagExists ? `exists    ${tag} -> ${sha.slice(0, 7)} (resuming)` : `create    ${tag} -> ${sha.slice(0, 7)}`);
+console.log(
+  tagExists
+    ? `exists    ${tag} -> ${sha.slice(0, 7)} (resuming)`
+    : `create    ${tag} -> ${sha.slice(0, 7)}`,
+);
 console.log(`${majorExists ? "move     " : "create   "} ${major} -> ${sha.slice(0, 7)}`);
 if (!apply) {
   console.log("\ndry run. Nothing was written. Re-run with --apply.");
@@ -121,16 +125,45 @@ if (!apply) {
 if (tagExists) {
   console.log(`${tag} already exists at this sha, skipping`);
 } else {
-  gh(["api", `repos/${REPO}/git/refs`, "-X", "POST", "-f", `ref=refs/tags/${tag}`, "-f", `sha=${sha}`]);
+  gh([
+    "api",
+    `repos/${REPO}/git/refs`,
+    "-X",
+    "POST",
+    "-f",
+    `ref=refs/tags/${tag}`,
+    "-f",
+    `sha=${sha}`,
+  ]);
   console.log(`created ${tag}`);
 }
 // The major pointer is the only tag this force-updates, and it is the one
 // consumers opted into by writing @v1 rather than a pinned version.
 if (majorExists) {
-  gh(["api", `repos/${REPO}/git/refs/tags/${major}`, "-X", "PATCH", "-f", `sha=${sha}`, "-F", "force=true"]);
+  gh([
+    "api",
+    `repos/${REPO}/git/refs/tags/${major}`,
+    "-X",
+    "PATCH",
+    "-f",
+    `sha=${sha}`,
+    "-F",
+    "force=true",
+  ]);
   console.log(`moved ${major} -> ${tag}`);
 } else {
-  gh(["api", `repos/${REPO}/git/refs`, "-X", "POST", "-f", `ref=refs/tags/${major}`, "-f", `sha=${sha}`]);
+  gh([
+    "api",
+    `repos/${REPO}/git/refs`,
+    "-X",
+    "POST",
+    "-f",
+    `ref=refs/tags/${major}`,
+    "-f",
+    `sha=${sha}`,
+  ]);
   console.log(`created ${major} -> ${tag}`);
 }
-console.log(`\nNow write the release notes:\n  gh release create ${tag} --repo ${REPO} --title "${tag}" --notes "..."`);
+console.log(
+  `\nNow write the release notes:\n  gh release create ${tag} --repo ${REPO} --title "${tag}" --notes "..."`,
+);
