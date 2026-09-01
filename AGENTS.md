@@ -78,6 +78,7 @@ vibecodereview sends diffs to third-party model providers. Use it on **personal 
 private repos**. Do not point it at proprietary or employer code.
 
 <!-- pr-standards:start -->
+
 ## Pull requests
 
 One issue. One PR. One concern. Under 500 counted lines.
@@ -98,10 +99,10 @@ Write "Fix the drop-off", not "Fixed the drop-off".
 
 Hard caps, failed by the `pr-standards` CI check: 500 counted lines, 40 counted
 files, exactly one `Closes #`. Lockfiles, build output, snapshots, generated
-code and migrations are not counted. If a change genuinely cannot be split, say
-why in the body and ask for the `oversized-approved` label. Do not apply that
-label yourself.
+code and migrations are not counted. There is no label that clears the cap and
+no one to ask for one. Split the change.
 
 Settings for this repo are in `.github/pr-standards.json`. The standard is at
 https://github.com/pooriaarab/scripts/blob/main/pr-standards.md
+
 <!-- pr-standards:end -->
