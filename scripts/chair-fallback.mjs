@@ -16,7 +16,7 @@
 import fs from "node:fs";
 import { execFileSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
-import { parseVerdict } from "./verdict-json.mjs";
+import { parseVerdict, truncate } from "./verdict-json.mjs";
 
 const MAX_DIFF_CHARS = 180_000;
 const TIMEOUT_MS = Number(process.env.CHAIR_FALLBACK_TIMEOUT_MS) || 180_000;
@@ -71,10 +71,6 @@ Reply with STRICT JSON and nothing else:
 
 Use "request_changes" only when at least one finding is Critical. Use "approve"
 when nothing Critical or Major survives. Otherwise "comment".`;
-
-function truncate(s, n) {
-  return s.length > n ? s.slice(0, n) : s;
-}
 
 function prContext() {
   const path = process.env.PR_CONTEXT_FILE;
@@ -251,8 +247,15 @@ function selfcheck() {
   let threw = false;
   try {
     parseVerdict('{"verdict":"comment","summary":');
-  } catch {
+  } catch (err) {
     threw = true;
+    // This has a `{` but no `}`, so it takes the "no JSON object" branch,
+    // which truncates the reply into the error message. A wrong or missing
+    // `truncate` import throws ReferenceError instead — catch that here
+    // rather than let a bare `threw` check paper over it.
+    if (!err.message.includes("no JSON object")) {
+      throw new Error(`selfcheck: wrong error for malformed JSON: ${err.message}`);
+    }
   }
   if (!threw) throw new Error("selfcheck: malformed JSON was accepted");
 

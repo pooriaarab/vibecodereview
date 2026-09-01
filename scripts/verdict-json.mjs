@@ -2,6 +2,10 @@
 // will emit a raw newline or a stray backslash inside a string. Split out of
 // chair-fallback.mjs so neither file exceeds the 300-line budget.
 
+export function truncate(s, n) {
+  return s.length > n ? s.slice(0, n) : s;
+}
+
 const VALID_ESCAPE = new Set(['"', "\\", "/", "b", "f", "n", "r", "t", "u"]);
 const CONTROL_ESCAPE = { "\n": "\\n", "\r": "\\r", "\t": "\\t", "\b": "\\b", "\f": "\\f" };
 const HEX4 = /^[0-9a-fA-F]{4}/;
