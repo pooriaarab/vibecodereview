@@ -19,7 +19,7 @@ python3 - "$(dirname "$HERE")/action.yml" "$WORK/hook.py" <<'PY'
 import sys
 lines = open(sys.argv[1]).read().splitlines()
 start = next(i for i, line in enumerate(lines)
-             if line.strip() == "cat > .vcr-hooks/prepare-commit-msg <<'VCR_HOOK_EOF'") + 1
+             if line.strip() == 'cat > "$VCR_HOOKS_DIR/prepare-commit-msg" <<\'VCR_HOOK_EOF\'') + 1
 end = next(i for i in range(start, len(lines)) if lines[i].strip() == "VCR_HOOK_EOF")
 indent = len(lines[start]) - len(lines[start].lstrip())
 open(sys.argv[2], "w").write("\n".join(line[indent:] for line in lines[start:end]) + "\n")
@@ -92,11 +92,20 @@ Co-authored-by: Grace Optperson <gptperson@example.com>' \
 
 Co-authored-by: Grace Optperson <gptperson@example.com>'
 
-# Wired: the directory the hook lives in must be excluded from the chair's
-# `git add -A`, or the hook ships into the repo it is reviewing.
-grep -q '/.vcr-hooks/' "$(dirname "$HERE")/action.yml" \
-  && printf 'ok    %s\n' 'action.yml excludes .vcr-hooks/ from git add -A' \
-  || { printf 'FAIL  %s\n' 'action.yml excludes .vcr-hooks/ from git add -A'; fails=$((fails + 1)); }
+# The fleet's pr-standards config explicitly bans a "pi" trailer alongside
+# Claude, Codex, Gemini, Kimi, Muse, Copilot and Cursor.
+check 'strips a Pi trailer' \
+  'fix: the thing
+
+Co-authored-by: pi <noreply@inflection.ai>' \
+  'fix: the thing'
+
+# Wired: the hook directory must come from git-dir, not the working tree, or
+# it can collide with a tracked file and `git add -A` can ship it into the
+# repo it is reviewing -- both near-misses during this PR's development.
+grep -q 'git rev-parse --git-dir.*/vcr-hooks' "$(dirname "$HERE")/action.yml" \
+  && printf 'ok    %s\n' 'hook directory is derived from git-dir, not the working tree' \
+  || { printf 'FAIL  %s\n' 'hook directory is derived from git-dir, not the working tree'; fails=$((fails + 1)); }
 
 [ "$fails" = 0 ] || { printf '\n%s failing\n' "$fails" >&2; exit 1; }
 printf '\nall passing\n'

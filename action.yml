@@ -105,17 +105,29 @@ runs:
         # vibecodereview[bot] in its author field, so the trailer carried no
         # attribution a reader did not already have.
         #
-        # core.hooksPath is set to a directory inside the checkout. Writing to
-        # `git rev-parse --git-path hooks` would resolve to a GLOBAL hooksPath
-        # wherever one is configured, and this must never write outside here.
-        mkdir -p .vcr-hooks
-        cat > .vcr-hooks/prepare-commit-msg <<'VCR_HOOK_EOF'
+        # core.hooksPath is a directory under .git, never the working tree.
+        # Two reasons: `.git` is never tracked, so the hook file can never
+        # collide with (and overwrite) a file the consumer repo already
+        # tracks at that path; and the chair's later `git add -A` can never
+        # see it, so no exclude entry is needed to keep it out of a commit.
+        # `git rev-parse --git-path hooks` was rejected instead of this: it
+        # resolves through a GLOBAL hooksPath wherever one is configured, and
+        # this must never write outside the checkout. `git rev-parse
+        # --git-dir` is not affected by hooksPath, so it has neither problem.
+        VCR_HOOKS_DIR="$(git rev-parse --git-dir)/vcr-hooks"
+        mkdir -p "$VCR_HOOKS_DIR"
+        cat > "$VCR_HOOKS_DIR/prepare-commit-msg" <<'VCR_HOOK_EOF'
         #!/usr/bin/env python3
         # Drop any Co-authored-by line naming a model or an agent vendor.
         # vibecodereview is spared on purpose: the standard exempts it by name.
+        #
+        # Keep this in sync with bannedCommitTrailers in the fleet's
+        # pr-standards config (pooriaarab/scripts, pr-standards.md) -- that
+        # list is the authority and can grow per repo without editing the
+        # checker there, which this static list cannot follow automatically.
         import re, sys
 
-        BANNED = r"claude|codex|gemini|kimi|muse|chatgpt|gpt|copilot|cursor|devin|anthropic|openai"
+        BANNED = r"claude|codex|gemini|kimi|muse|pi|chatgpt|gpt|copilot|cursor|devin|anthropic|openai"
         path = sys.argv[1]
         kept = []
         for line in open(path).read().splitlines(keepends=True):
@@ -127,8 +139,8 @@ runs:
             kept.append(line)
         open(path, "w").write("".join(kept))
         VCR_HOOK_EOF
-        chmod +x .vcr-hooks/prepare-commit-msg
-        git config core.hooksPath .vcr-hooks
+        chmod +x "$VCR_HOOKS_DIR/prepare-commit-msg"
+        git config core.hooksPath "$VCR_HOOKS_DIR"
 
     - name: Write PR context
       shell: bash
@@ -257,11 +269,11 @@ runs:
         # or docs/pr.diff, is not silently excluded from the chair's commit.
         # Listed exactly (no `probe.*` glob) so a legitimately named
         # `probe.<ext>` file elsewhere at the root is never swallowed.
-        # /.vcr-hooks/ is ours too: the commit-trailer hook written in
-        # "Configure git" lives in the workspace, so `git add -A` would ship the
-        # hook into the consumer's repo alongside the fix.
+        # The commit-trailer hook from "Configure git" needs no entry here:
+        # it lives under .git/vcr-hooks, outside the working tree `git add -A`
+        # walks.
         printf '%s\n' /pr.diff /council-findings.md /council.log /council.pid \
-          /probe.1 /probe.2 /probe.3 /reason.1 /reason.2 /reason.3 /.vcr-hooks/ \
+          /probe.1 /probe.2 /probe.3 /reason.1 /reason.2 /reason.3 \
           >> "$(git rev-parse --git-dir)/info/exclude"
         gh pr diff ${{ github.event.pull_request.number }} > pr.diff || true
         nohup node "${{ github.action_path }}/scripts/council-review.mjs" \
