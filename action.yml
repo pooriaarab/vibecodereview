@@ -94,6 +94,13 @@ runs:
     # A full-history clone is usually waste here: the diff comes from the API,
     # and the delta needs only the previous reviewed head plus the commits the
     # fix-cycle guard counts. A missing previous head fails open to the API diff.
+    # Recorded before anything reviews, so the result gate can tell a review
+    # posted by THIS run from one left by an earlier cycle. Without it a stale
+    # review from yesterday would satisfy today's gate.
+    - name: Mark the start of this run
+      id: gate_start
+      shell: bash
+      run: echo "at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
     - name: Checkout PR branch
       uses: actions/checkout@v4
       with:
@@ -843,24 +850,63 @@ runs:
           gh api "repos/$VCR_REPO/issues/$VCR_PR/comments" -X POST -F body=@budget-comment.md --silent
         fi
 
+    # The gate asks whether a review was POSTED, not whether a step exited 0.
+    #
+    # A step can succeed and review nothing. claude-code-action refuses to run
+    # when the pull request edits its own workflow file -- a correct control, a
+    # pull request must not edit the reviewer that judges it -- and a skipped
+    # action still exits 0. So the outcome read `success`, this gate printed
+    # "backup token succeeded", the check went green, and no review existed.
+    # Eight pull requests in the fleet carried that green check on one day.
+    #
+    # Green is the dangerous direction: a red check gets investigated and a
+    # green one gets merged. So the only evidence accepted here is a review on
+    # the pull request, newer than this run's start.
     - name: Chair result gate
       shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github_token }}
+        VCR_PR: ${{ github.event.pull_request.number }}
+        VCR_REPO: ${{ github.repository }}
+        P: ${{ steps.chair_primary.outcome }}
+        B: ${{ steps.chair_backup.outcome }}
+        T: ${{ steps.chair_third.outcome }}
+        Q: ${{ steps.chair_fourth.outcome }}
+        F: ${{ steps.chair_fallback.outcome }}
+        OVER_BUDGET: ${{ steps.budget.outputs.over }}
+        TOKEN_1: ${{ steps.chair_probe.outputs.token_1 }}
+        TOKEN_2: ${{ steps.chair_probe.outputs.token_2 }}
+        TOKEN_3: ${{ steps.chair_probe.outputs.token_3 }}
+        TOKEN_4: ${{ steps.chair_probe.outputs.token_4 }}
+        STARTED_AT: ${{ steps.gate_start.outputs.at }}
       run: |
-        P="${{ steps.chair_primary.outcome }}"
-        B="${{ steps.chair_backup.outcome }}"
-        T="${{ steps.chair_third.outcome }}"
-        Q="${{ steps.chair_fourth.outcome }}"
-        F="${{ steps.chair_fallback.outcome }}"
-        if [ "${{ steps.budget.outputs.over }}" = "true" ]; then
+        set -uo pipefail
+        if [ "$OVER_BUDGET" = "true" ]; then
           echo "chair: skipped, the pull request is over budget"; exit 0
         fi
-        if [ "$P" = "success" ]; then echo "chair: primary token succeeded"; exit 0; fi
-        if [ "$B" = "success" ]; then echo "chair: primary did not review ($P); backup token succeeded"; exit 0; fi
-        if [ "$T" = "success" ]; then echo "chair: primary and backup failed; third token succeeded"; exit 0; fi
-        if [ "$Q" = "success" ]; then echo "chair: first three tokens failed; fourth token succeeded"; exit 0; fi
-        if [ "$F" = "success" ]; then echo "chair: all Claude tokens failed; OpenRouter fallback posted the review"; exit 0; fi
-        echo "chair review failed (primary=$P, backup=${B:-skipped}, third=${T:-skipped}, fourth=${Q:-skipped}, fallback=${F:-skipped})"
-        echo "probe: token_1=${{ steps.chair_probe.outputs.token_1 }} token_2=${{ steps.chair_probe.outputs.token_2 }} token_3=${{ steps.chair_probe.outputs.token_3 }} token_4=${{ steps.chair_probe.outputs.token_4 }}"
+
+        # Which step claims to have reviewed. Kept for the message only; the
+        # claim is not what decides the outcome.
+        claimed="none"
+        [ "$P" = "success" ] && claimed="primary"
+        [ "$claimed" = none ] && [ "$B" = "success" ] && claimed="backup"
+        [ "$claimed" = none ] && [ "$T" = "success" ] && claimed="third"
+        [ "$claimed" = none ] && [ "$Q" = "success" ] && claimed="fourth"
+        [ "$claimed" = none ] && [ "$F" = "success" ] && claimed="fallback"
+
+        posted=$(gh api "repos/$VCR_REPO/pulls/$VCR_PR/reviews" --paginate \
+          --jq "[.[] | select(.submitted_at >= \"$STARTED_AT\")] | length" 2>/dev/null || echo 0)
+
+        if [ "${posted:-0}" -gt 0 ]; then
+          echo "chair: $claimed posted $posted review(s) this run"
+          exit 0
+        fi
+
+        echo "chair posted no review this run (claimed=$claimed; primary=$P, backup=${B:-skipped}, third=${T:-skipped}, fourth=${Q:-skipped}, fallback=${F:-skipped})"
+        echo "probe: token_1=$TOKEN_1 token_2=$TOKEN_2 token_3=$TOKEN_3 token_4=$TOKEN_4"
+        echo "A step that exits 0 without posting is the failure this gate exists to catch."
+        echo "Most often: the pull request edits .github/workflows/vibecodereview.yml, and"
+        echo "claude-code-action refuses to run when the workflow differs from the default branch."
         exit 1
 
     # Persist the review boundary and the findings that still need a chair's
