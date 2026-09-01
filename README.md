@@ -149,6 +149,19 @@ export COUNCIL_MODELS="custom|<model>|Name|lens"
 
 No `CUSTOM_BASE_URL` → the member skips with a note, same as a missing key.
 
+## What the chair's commits look like
+
+A fix the chair pushes is authored by `vibecodereview[bot]`, and it carries no
+model trailer. The Claude Code CLI adds `Co-Authored-By: Claude <model>` by
+default, and a fleet running the `pr-standards` check rejects a commit trailer
+that names a model or an agent — so the chair used to push a fix that turned the
+pull request red, on a commit its author could not amend because they did not
+make it.
+
+A `prepare-commit-msg` hook strips it, rather than a line in the chair's prompt:
+a prompt is a request to a model, and this has to hold every time. A
+`Co-authored-by` naming a human, or `vibecodereview` itself, is left alone.
+
 ## What a fix cycle costs
 
 When the chair pushes a fix, that is a real commit on the PR branch, so GitHub
