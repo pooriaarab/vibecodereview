@@ -5,6 +5,8 @@ surfaces: a GitHub composite Action (`action.yml`), a CLI (`bin/vibecodereview.m
 and an MCP server (`mcp/server.mjs`). Keep the engine the single source of truth —
 never fork its provider/lens logic into the surfaces.
 
+Read `.agents/brand.md` and `.agents/design.md` before public copy or interface work.
+
 ## Layout
 
 - `scripts/council-review.mjs` — fans a diff out to council models (OpenAI-compatible
