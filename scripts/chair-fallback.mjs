@@ -108,14 +108,17 @@ async function askChair(diff, council, diffTruncated) {
           {
             role: "user",
             content:
-              (diffTruncated ? "NOTE: this diff was truncated for length. Judge only what you can see.\n\n" : "") +
+              (diffTruncated
+                ? "NOTE: this diff was truncated for length. Judge only what you can see.\n\n"
+                : "") +
               (context ? `PR title, body and linked issues:\n\n${context}\n\n---\n\n` : "") +
               `PR diff:\n\n${diff}\n\n---\n\nCouncil findings:\n\n${council}`,
           },
         ],
       }),
     });
-    if (!res.ok) throw new Error(`HTTP ${res.status}: ${truncate(await res.text().catch(() => ""), 300)}`);
+    if (!res.ok)
+      throw new Error(`HTTP ${res.status}: ${truncate(await res.text().catch(() => ""), 300)}`);
     const json = await res.json();
     const text = json?.choices?.[0]?.message?.content?.trim();
     if (!text) throw new Error("empty response");
@@ -184,7 +187,8 @@ function repairJsonStrings(text) {
 function parseVerdict(text) {
   const start = text.indexOf("{");
   const end = text.lastIndexOf("}");
-  if (start === -1 || end <= start) throw new Error(`no JSON object in chair reply: ${truncate(text, 200)}`);
+  if (start === -1 || end <= start)
+    throw new Error(`no JSON object in chair reply: ${truncate(text, 200)}`);
   const candidate = text.slice(start, end + 1);
   try {
     return JSON.parse(candidate);
@@ -192,7 +196,9 @@ function parseVerdict(text) {
     try {
       return JSON.parse(repairJsonStrings(candidate));
     } catch (repairErr) {
-      throw new Error(`chair reply is not JSON even after repair: ${err.message} (repair attempt: ${repairErr.message})`);
+      throw new Error(
+        `chair reply is not JSON even after repair: ${err.message} (repair attempt: ${repairErr.message})`,
+      );
     }
   }
 }
@@ -207,7 +213,8 @@ function normalizeFindings(parsed) {
   // exactly the "never approve over a Major" guarantee this file exists to
   // keep. json_object mode guarantees valid JSON, not the instructed schema,
   // so treat a wrong shape as a hard failure rather than an empty review.
-  if (!Array.isArray(raw)) throw new Error("chair reply had a malformed `findings` field (expected an array)");
+  if (!Array.isArray(raw))
+    throw new Error("chair reply had a malformed `findings` field (expected an array)");
   const bad = raw.filter((f) => !f || typeof f !== "object");
   if (bad.length) throw new Error(`chair reply had ${bad.length} finding(s) that were not objects`);
   // Severity is matched with === below, so "major" would slip past the gate
@@ -218,7 +225,8 @@ function normalizeFindings(parsed) {
   // so trim, then refuse what we do not recognize.
   for (const f of raw) {
     const severity = SEVERITIES[String(f.severity).trim().toLowerCase()];
-    if (!severity) throw new Error(`chair reply used an unrecognized severity: ${JSON.stringify(f.severity)}`);
+    if (!severity)
+      throw new Error(`chair reply used an unrecognized severity: ${JSON.stringify(f.severity)}`);
     f.severity = severity;
   }
   return raw;
@@ -248,7 +256,10 @@ function renderBody(parsed, findings, { diffTruncated } = {}) {
     "",
   ];
   if (diffTruncated) {
-    lines.push("> ⚠️ The diff was truncated for length; this review covers the first portion only.", "");
+    lines.push(
+      "> ⚠️ The diff was truncated for length; this review covers the first portion only.",
+      "",
+    );
   }
   if (sorted.length) {
     lines.push("### Findings", "");
@@ -266,23 +277,29 @@ function renderBody(parsed, findings, { diffTruncated } = {}) {
 function selfcheck() {
   // The reply that lost a whole review on PR #27: markdown underscores escaped
   // the markdown way, which JSON does not define.
-  const escaped = parseVerdict(String.raw`{"verdict":"comment","summary":"see \_foo\_ and C:\path","findings":[]}`);
+  const escaped = parseVerdict(
+    String.raw`{"verdict":"comment","summary":"see \_foo\_ and C:\path","findings":[]}`,
+  );
   if (!escaped.summary.includes("foo")) throw new Error("selfcheck: invalid escape not repaired");
 
   // A raw newline inside a string is the other way a markdown-writing model
   // breaks its own JSON.
   const raw = parseVerdict('{"verdict":"comment","summary":"line one\nline two","findings":[]}');
-  if (!raw.summary.includes("line two")) throw new Error("selfcheck: raw control character not repaired");
+  if (!raw.summary.includes("line two"))
+    throw new Error("selfcheck: raw control character not repaired");
 
   // Well-formed JSON must survive untouched — the repair is a fallback, not a
   // rewrite. \n stays a newline; it must not become a literal backslash-n.
   const clean = parseVerdict('{"verdict":"approve","summary":"a\\nb","findings":[]}');
-  if (clean.summary !== "a\nb") throw new Error("selfcheck: valid escape was mangled: " + JSON.stringify(clean.summary));
+  if (clean.summary !== "a\nb")
+    throw new Error("selfcheck: valid escape was mangled: " + JSON.stringify(clean.summary));
 
   // A raw control character right after an invalid escape (e.g. a stray
   // backslash at the end of a copied line, immediately followed by the
   // newline that ends it) must still get escaped, not copied through raw.
-  const backslashNewline = parseVerdict('{"verdict":"comment","summary":"end \\\nnext","findings":[]}');
+  const backslashNewline = parseVerdict(
+    '{"verdict":"comment","summary":"end \\\nnext","findings":[]}',
+  );
   if (!backslashNewline.summary.includes("next")) {
     throw new Error("selfcheck: control char after invalid escape not repaired");
   }
@@ -290,16 +307,25 @@ function selfcheck() {
   // A path like `C:\users` has `\u` followed by non-hex characters — not a
   // valid unicode escape. Only the backslash should be escaped; `u` and the
   // rest of the path must survive untouched.
-  const badUnicode = parseVerdict(String.raw`{"verdict":"comment","summary":"see C:\users\config","findings":[]}`);
+  const badUnicode = parseVerdict(
+    String.raw`{"verdict":"comment","summary":"see C:\users\config","findings":[]}`,
+  );
   if (!badUnicode.summary.includes("C:\\users\\config")) {
-    throw new Error("selfcheck: invalid \\u escape not repaired: " + JSON.stringify(badUnicode.summary));
+    throw new Error(
+      "selfcheck: invalid \\u escape not repaired: " + JSON.stringify(badUnicode.summary),
+    );
   }
 
   // A value ending in a lone backslash right before the real closing quote
   // (e.g. a Windows path) must not have that quote swallowed as `\"`.
-  const trailingBackslash = parseVerdict(String.raw`{"verdict":"comment","summary":"C:\path\","findings":[]}`);
+  const trailingBackslash = parseVerdict(
+    String.raw`{"verdict":"comment","summary":"C:\path\","findings":[]}`,
+  );
   if (trailingBackslash.summary !== "C:\\path\\") {
-    throw new Error("selfcheck: trailing backslash before closing quote not repaired: " + JSON.stringify(trailingBackslash.summary));
+    throw new Error(
+      "selfcheck: trailing backslash before closing quote not repaired: " +
+        JSON.stringify(trailingBackslash.summary),
+    );
   }
 
   // A genuine `\"` mid-sentence (a quoted word) followed by a comma must NOT
@@ -309,10 +335,13 @@ function selfcheck() {
   // all), this used to truncate the string at the quoted word and fail the
   // whole reply.
   const quoteThenComma = parseVerdict(
-    String.raw`{"verdict":"comment","summary":"say \"hi\", and \_bold\_ done","findings":[]}`
+    String.raw`{"verdict":"comment","summary":"say \"hi\", and \_bold\_ done","findings":[]}`,
   );
   if (quoteThenComma.summary !== 'say "hi", and \\_bold\\_ done') {
-    throw new Error("selfcheck: quoted phrase before comma misread as closing quote: " + JSON.stringify(quoteThenComma.summary));
+    throw new Error(
+      "selfcheck: quoted phrase before comma misread as closing quote: " +
+        JSON.stringify(quoteThenComma.summary),
+    );
   }
 
   // Repair is not a licence to accept anything: a truncated object still fails.
@@ -338,10 +367,14 @@ async function main() {
   const diff = diffFile && fs.existsSync(diffFile) ? fs.readFileSync(diffFile, "utf8") : "";
   if (!diff.trim()) throw new Error("empty diff");
   const council =
-    councilFile && fs.existsSync(councilFile) ? fs.readFileSync(councilFile, "utf8") : "_No council findings._";
+    councilFile && fs.existsSync(councilFile)
+      ? fs.readFileSync(councilFile, "utf8")
+      : "_No council findings._";
 
   const diffTruncated = diff.length > MAX_DIFF_CHARS;
-  const parsed = parseVerdict(await askChair(truncate(diff, MAX_DIFF_CHARS), council, diffTruncated));
+  const parsed = parseVerdict(
+    await askChair(truncate(diff, MAX_DIFF_CHARS), council, diffTruncated),
+  );
   const findings = normalizeFindings(parsed);
   // A syntactically-valid but empty reply ({}) would otherwise post "_No
   // summary._" with no findings and still report the step as a success —
@@ -355,9 +388,13 @@ async function main() {
 
   fs.writeFileSync("chair-fallback-review.md", body);
   const post = (f) =>
-    execFileSync("gh", ["pr", "review", String(pr), "--repo", repo, f, "--body-file", "chair-fallback-review.md"], {
-      stdio: "inherit",
-    });
+    execFileSync(
+      "gh",
+      ["pr", "review", String(pr), "--repo", repo, f, "--body-file", "chair-fallback-review.md"],
+      {
+        stdio: "inherit",
+      },
+    );
   try {
     post(flag);
     console.log(`fallback chair posted ${flag} (${findings.length} findings, model ${MODEL})`);
@@ -371,9 +408,12 @@ async function main() {
     // But a downgraded --request-changes must NOT read as a pass: the verdict
     // said Critical, and a green check would silently drop the block.
     if (flag === "--request-changes") {
-      throw new Error("posted the review as a comment, but could not request changes on a Critical finding", {
-        cause: err,
-      });
+      throw new Error(
+        "posted the review as a comment, but could not request changes on a Critical finding",
+        {
+          cause: err,
+        },
+      );
     }
     console.log(`fallback chair posted --comment (${findings.length} findings, model ${MODEL})`);
   }

@@ -9,7 +9,10 @@ export const PROVIDERS = {
     keyEnv: "GEMINI_API_KEY",
   },
   moonshot: { url: "https://api.moonshot.ai/v1/chat/completions", keyEnv: "MOONSHOT_API_KEY" },
-  openrouter: { url: "https://openrouter.ai/api/v1/chat/completions", keyEnv: "OPENROUTER_API_KEY" },
+  openrouter: {
+    url: "https://openrouter.ai/api/v1/chat/completions",
+    keyEnv: "OPENROUTER_API_KEY",
+  },
   // Generic OpenAI-compatible endpoint (OpenRouter, self-hosted proxy, local
   // OffRouter). URL comes from env at call time; unset means the member skips.
   custom: { url: process.env.CUSTOM_BASE_URL, keyEnv: "CUSTOM_API_KEY" },
@@ -71,22 +74,48 @@ export const CREDENTIAL_FAILURE_STATUSES = [401, 402, 403, 429];
 export function openRouterFallbackFor(model) {
   if (model.provider === "openrouter") return null;
   if (!process.env.OPENROUTER_API_KEY?.trim()) return null;
-  const mapped = OPENROUTER_EQUIVALENT[model.model] || (model.model.includes("/") ? model.model : null);
+  const mapped =
+    OPENROUTER_EQUIVALENT[model.model] || (model.model.includes("/") ? model.model : null);
   if (!mapped) return null;
   return { ...model, provider: "openrouter", model: mapped };
 }
 
 export const DEFAULT_MODELS = [
-  { provider: "openai", model: process.env.OPENAI_MODEL || "gpt-5.6", name: "GPT-5.6 (Codex)", lens: "correctness" },
-  { provider: "gemini", model: process.env.GEMINI_MODEL || "gemini-3.1-pro-preview", name: "Gemini 3 Pro", lens: "performance" },
-  { provider: "moonshot", model: process.env.MOONSHOT_MODEL || "kimi-k3", name: "Kimi K3", lens: "security" },
-  { provider: "openrouter", model: process.env.OPENROUTER_MODEL || "x-ai/grok-4.5", name: "Grok 4.5", lens: "maintainability" },
+  {
+    provider: "openai",
+    model: process.env.OPENAI_MODEL || "gpt-5.6",
+    name: "GPT-5.6 (Codex)",
+    lens: "correctness",
+  },
+  {
+    provider: "gemini",
+    model: process.env.GEMINI_MODEL || "gemini-3.1-pro-preview",
+    name: "Gemini 3 Pro",
+    lens: "performance",
+  },
+  {
+    provider: "moonshot",
+    model: process.env.MOONSHOT_MODEL || "kimi-k3",
+    name: "Kimi K3",
+    lens: "security",
+  },
+  {
+    provider: "openrouter",
+    model: process.env.OPENROUTER_MODEL || "x-ai/grok-4.5",
+    name: "Grok 4.5",
+    lens: "maintainability",
+  },
   // Scope rides OpenRouter, not the native OpenAI key that `correctness`
   // already uses. Two lenses behind one key means one `insufficient_quota`
   // takes out both, and on 2026-08-27 that key was 429-ing on 47 of the 48
   // repos running this action. Its own SCOPE_MODEL override keeps a change
   // here from silently re-pointing the correctness member too.
-  { provider: "openrouter", model: process.env.SCOPE_MODEL || "openai/gpt-5.6", name: "GPT-5.6 (scope)", lens: "scope" },
+  {
+    provider: "openrouter",
+    model: process.env.SCOPE_MODEL || "openai/gpt-5.6",
+    name: "GPT-5.6 (scope)",
+    lens: "scope",
+  },
 ];
 
 // Test files whose ADDED lines make a mutation review worth paying for. The
@@ -148,7 +177,12 @@ export function diffAddsTestLines(diff) {
 // give quota isolation -- mutation shares OPENROUTER_API_KEY with the scope and
 // maintainability members, so an exhausted key still takes out all three.
 export function mutationMember() {
-  if (String(process.env.MUTATION_LENS || "").trim().toLowerCase() !== "true") return null;
+  if (
+    String(process.env.MUTATION_LENS || "")
+      .trim()
+      .toLowerCase() !== "true"
+  )
+    return null;
   return {
     provider: "openrouter",
     model: process.env.MUTATION_MODEL || "anthropic/claude-sonnet-5",
@@ -174,7 +208,8 @@ export function withMutationMember(models, diff) {
   const base = models.filter((m) => m.lens !== "mutation");
   const mutation = mutationMember();
   if (!mutation) return { members: base, mutationSkipped: null };
-  if (!diffAddsTestLines(diff)) return { members: base, mutationSkipped: "the diff adds no test lines" };
+  if (!diffAddsTestLines(diff))
+    return { members: base, mutationSkipped: "the diff adds no test lines" };
   return { members: [...base, mutation], mutationSkipped: null };
 }
 
@@ -186,11 +221,16 @@ export function selfcheckMutationRoster(buildFindingsMarkdown) {
   // The mutation lens must be OFF unless asked for. It is the front half of
   // something that gets expensive once it runs what it proposes, so a default
   // roster that quietly included it would be a cost nobody chose.
-  if (DEFAULT_MODELS.some((m) => m.lens === "mutation")) throw new Error("selfcheck: mutation lens is a default member");
-  const testDiff = "diff --git a/tests/t.py b/tests/t.py\n--- a/tests/t.py\n+++ b/tests/t.py\n+assert f() == 1\n";
-  const codeDiff = "diff --git a/src/a.ts b/src/a.ts\n--- a/src/a.ts\n+++ b/src/a.ts\n+const x = 1;\n";
-  if (diffAddsTestLines(codeDiff)) throw new Error("selfcheck: a code-only diff counted as adding tests");
-  if (!diffAddsTestLines(testDiff)) throw new Error("selfcheck: a test diff did not count as adding tests");
+  if (DEFAULT_MODELS.some((m) => m.lens === "mutation"))
+    throw new Error("selfcheck: mutation lens is a default member");
+  const testDiff =
+    "diff --git a/tests/t.py b/tests/t.py\n--- a/tests/t.py\n+++ b/tests/t.py\n+assert f() == 1\n";
+  const codeDiff =
+    "diff --git a/src/a.ts b/src/a.ts\n--- a/src/a.ts\n+++ b/src/a.ts\n+const x = 1;\n";
+  if (diffAddsTestLines(codeDiff))
+    throw new Error("selfcheck: a code-only diff counted as adding tests");
+  if (!diffAddsTestLines(testDiff))
+    throw new Error("selfcheck: a test diff did not count as adding tests");
   // Java/Kotlin/Scala name a test by suffix, not by directory or separator.
   if (
     !diffAddsTestLines("--- a/src/FooTest.java\n+++ b/src/FooTest.java\n+assertEquals(1, f());\n")
@@ -200,13 +240,17 @@ export function selfcheckMutationRoster(buildFindingsMarkdown) {
   // A lowercase "test" fused inside an unrelated word must NOT match -- only
   // the capitalized Test/Spec suffix does.
   if (diffAddsTestLines("--- a/src/Latest.js\n+++ b/src/Latest.js\n+const x = 1;\n")) {
-    throw new Error("selfcheck: a filename merely containing lowercase 'test' was misclassified as a test file");
+    throw new Error(
+      "selfcheck: a filename merely containing lowercase 'test' was misclassified as a test file",
+    );
   }
   // A test file that is only DELETED from adds nothing to review.
-  if (diffAddsTestLines("--- a/tests/t.py\n+++ b/tests/t.py\n-assert f() == 1\n")) throw new Error("selfcheck: a deletion counted as adding tests");
+  if (diffAddsTestLines("--- a/tests/t.py\n+++ b/tests/t.py\n-assert f() == 1\n"))
+    throw new Error("selfcheck: a deletion counted as adding tests");
   // The header itself starts with "+", so a naive scan of "+" lines would
   // report every diff as touching tests the moment one test file appears.
-  if (diffAddsTestLines("--- a/tests/t.py\n+++ b/tests/t.py\n")) throw new Error("selfcheck: the +++ header counted as an added line");
+  if (diffAddsTestLines("--- a/tests/t.py\n+++ b/tests/t.py\n"))
+    throw new Error("selfcheck: the +++ header counted as an added line");
   // ...and the flag has to reset at the next file, or one test file makes
   // every later hunk in the diff look like a test.
   if (
@@ -221,39 +265,47 @@ export function selfcheckMutationRoster(buildFindingsMarkdown) {
   // "+++ " header to its preceding "--- " line, that content line would be
   // misread as a new file header and silently swallow the real test line
   // that follows it.
-  if (
-    !diffAddsTestLines(
-      "--- a/tests/t.py\n+++ b/tests/t.py\n+++ counter;\n+assert f() == 1\n",
-    )
-  ) {
+  if (!diffAddsTestLines("--- a/tests/t.py\n+++ b/tests/t.py\n+++ counter;\n+assert f() == 1\n")) {
     throw new Error("selfcheck: an added '++ ' content line was misread as a file header");
   }
   const savedLens = process.env.MUTATION_LENS;
   try {
     delete process.env.MUTATION_LENS;
-    if (withMutationMember([], testDiff).members.length !== 0) throw new Error("selfcheck: mutation member added while disabled");
+    if (withMutationMember([], testDiff).members.length !== 0)
+      throw new Error("selfcheck: mutation member added while disabled");
     // A COUNCIL_MODELS override can name any lens string, including "mutation".
     // With the gate disabled that entry must be stripped, not dispatched as-is
     // -- otherwise a hand-written CSV row bypasses mutation_lens entirely.
     const smuggled = [{ provider: "openrouter", model: "x", name: "Smuggled", lens: "mutation" }];
     if (withMutationMember(smuggled, testDiff).members.length !== 0) {
-      throw new Error("selfcheck: a pre-existing mutation-lens member was dispatched while the gate is disabled");
+      throw new Error(
+        "selfcheck: a pre-existing mutation-lens member was dispatched while the gate is disabled",
+      );
     }
     process.env.MUTATION_LENS = "true";
     const on = withMutationMember([], testDiff);
-    if (on.members.length !== 1 || on.members[0].lens !== "mutation") throw new Error("selfcheck: mutation member not added when enabled");
+    if (on.members.length !== 1 || on.members[0].lens !== "mutation")
+      throw new Error("selfcheck: mutation member not added when enabled");
     // Even enabled, a smuggled entry must not double up with the canonical one.
     const onWithSmuggled = withMutationMember(smuggled, testDiff);
-    if (onWithSmuggled.members.length !== 1 || onWithSmuggled.members[0].name !== "Claude Sonnet 5 (mutation)") {
-      throw new Error("selfcheck: a pre-existing mutation-lens member duplicated the canonical one");
+    if (
+      onWithSmuggled.members.length !== 1 ||
+      onWithSmuggled.members[0].name !== "Claude Sonnet 5 (mutation)"
+    ) {
+      throw new Error(
+        "selfcheck: a pre-existing mutation-lens member duplicated the canonical one",
+      );
     }
     const skipped = withMutationMember([], codeDiff);
-    if (skipped.members.length !== 0) throw new Error("selfcheck: mutation member dispatched on a diff with no tests");
-    if (!skipped.mutationSkipped) throw new Error("selfcheck: skipped mutation member reported no reason");
+    if (skipped.members.length !== 0)
+      throw new Error("selfcheck: mutation member dispatched on a diff with no tests");
+    if (!skipped.mutationSkipped)
+      throw new Error("selfcheck: skipped mutation member reported no reason");
     // The reason has to reach the report. Silence reads as "found nothing",
     // which is the opposite of "never ran".
     const mdSkip = buildFindingsMarkdown([], { mutationSkipped: skipped.mutationSkipped });
-    if (!mdSkip.includes("Mutation lens enabled but not dispatched")) throw new Error("selfcheck: skip reason missing from the report");
+    if (!mdSkip.includes("Mutation lens enabled but not dispatched"))
+      throw new Error("selfcheck: skip reason missing from the report");
   } finally {
     if (savedLens === undefined) delete process.env.MUTATION_LENS;
     else process.env.MUTATION_LENS = savedLens;
