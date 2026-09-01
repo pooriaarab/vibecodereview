@@ -18,7 +18,8 @@ import json, sys
 
 with open(sys.argv[1]) as source:
     data = json.load(source)
-if not isinstance(data, dict) or not isinstance(data.get("workflow_runs"), list):
+runs = data.get("workflow_runs") if isinstance(data, dict) else None
+if not isinstance(runs, list) or not all(isinstance(r, dict) for r in runs):
     raise SystemExit(1)
 PY
 then

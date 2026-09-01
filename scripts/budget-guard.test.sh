@@ -69,6 +69,7 @@ cat > "$WORK/bin/gh" <<'SH'
 case "$GH_CASE" in
   failed) printf '%s' '{"workflow_runs":[{"path":"partial"}]}' ; exit 1 ;;
   malformed) printf '%s' '{broken' ; exit 0 ;;
+  null_entry) printf '%s' '{"workflow_runs":[null]}' ; exit 0 ;;
   valid) printf '%s' '{"workflow_runs":[{"path":"kept"}]}' ; exit 0 ;;
 esac
 SH
@@ -87,6 +88,8 @@ check_fetch '{"workflow_runs":[]}' \
   'a failed request replaces its response body' "$(fetch failed)"
 check_fetch '{"workflow_runs":[]}' \
   'a malformed successful response fails open' "$(fetch malformed)"
+check_fetch '{"workflow_runs":[]}' \
+  'a run entry that is not an object fails open' "$(fetch null_entry)"
 check_fetch '{"workflow_runs":[{"path":"kept"}]}' \
   'a valid response stays unchanged' "$(fetch valid)"
 
