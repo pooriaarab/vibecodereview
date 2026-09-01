@@ -14,6 +14,9 @@ inputs:
   claude_code_oauth_token_3:
     description: "Third Claude Code OAuth token. Used only if BOTH the primary and backup chair runs fail. A two-deep chain leaves the whole fleet on one subscription once the primary caps out, which is how a fleet-wide outage happens. Omit to keep the chain two deep."
     required: false
+  claude_code_oauth_token_4:
+    description: "Fourth Claude Code OAuth token. Used only after the first three chair runs fail. Omit to keep the chain three deep."
+    required: false
   github_token:
     description: "Token for gh (PR read + review write). Pass the workflow github.token from the caller."
     required: true
@@ -482,8 +485,8 @@ runs:
     #
     # The probe runs the SAME CLI the action runs, with the same token, so it is
     # faithful by construction: a dead token returns the documented signature
-    # (is_error true, num_turns 1, total_cost_usd 0, empty modelUsage). The three
-    # probes run concurrently, so the cost is one probe (~1-4s), not three.
+    # (is_error true, num_turns 1, total_cost_usd 0, empty modelUsage). The four
+    # probes run concurrently, so the cost is one probe (~1-4s), not four.
     #
     # It FAILS OPEN. Only that exact signature prunes an attempt. A timeout, a
     # crash, a parse failure or any unexpected output leaves the attempt in
@@ -502,6 +505,7 @@ runs:
         VCR_T1: ${{ inputs.claude_code_oauth_token }}
         VCR_T2: ${{ inputs.claude_code_oauth_token_2 }}
         VCR_T3: ${{ inputs.claude_code_oauth_token_3 }}
+        VCR_T4: ${{ inputs.claude_code_oauth_token_4 }}
       run: |
         probe() {
           slot="$1"; token="$2"
@@ -535,8 +539,9 @@ runs:
         probe 1 "$VCR_T1" &
         probe 2 "$VCR_T2" &
         probe 3 "$VCR_T3" &
+        probe 4 "$VCR_T4" &
         wait
-        for s in 1 2 3; do
+        for s in 1 2 3 4; do
           v="$(cat "probe.$s" 2>/dev/null || echo live)"
           [ "$v" = "dead" ] || v="live"
           echo "token_${s}=$v" >> "$GITHUB_OUTPUT"
@@ -621,6 +626,18 @@ runs:
         prompt: ${{ steps.prompt.outputs.text }}
         claude_args: '--allowed-tools "Bash(gh api:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr review:*),Bash(gh pr comment:*),Bash(git:*),Bash(jq:*),Bash(cat:*),Bash(ls:*),Bash(head:*),Bash(wc:*),Read,Glob,Grep,Edit,Write,TodoWrite"'
 
+    - name: Chair review (fourth token)
+      id: chair_fourth
+      if: steps.budget.outputs.over != 'true' && steps.chair_primary.outcome != 'success' && steps.chair_backup.outcome != 'success' && steps.chair_third.outcome != 'success' && steps.chair_probe.outputs.token_4 != 'dead' && inputs.claude_code_oauth_token_4 != ''
+      continue-on-error: true
+      uses: anthropics/claude-code-action@v1
+      with:
+        claude_code_oauth_token: ${{ inputs.claude_code_oauth_token_4 }}
+        use_commit_signing: true
+        allowed_bots: "*"
+        prompt: ${{ steps.prompt.outputs.text }}
+        claude_args: '--allowed-tools "Bash(gh api:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr review:*),Bash(gh pr comment:*),Bash(git:*),Bash(jq:*),Bash(cat:*),Bash(ls:*),Bash(head:*),Bash(wc:*),Read,Glob,Grep,Edit,Write,TodoWrite"'
+
     # Surface the true result: green if any chair run succeeded; red if they all
     # failed. Without this, continue-on-error would mask a genuine failure as
     # success. A chair that dies in ~0.5s at $0 cost with one turn is a dead
@@ -636,6 +653,7 @@ runs:
         steps.chair_primary.outcome != 'success' &&
         steps.chair_backup.outcome != 'success' &&
         steps.chair_third.outcome != 'success' &&
+        steps.chair_fourth.outcome != 'success' &&
         inputs.openrouter_api_key != ''
       continue-on-error: true
       shell: bash
@@ -700,6 +718,7 @@ runs:
         P="${{ steps.chair_primary.outcome }}"
         B="${{ steps.chair_backup.outcome }}"
         T="${{ steps.chair_third.outcome }}"
+        Q="${{ steps.chair_fourth.outcome }}"
         F="${{ steps.chair_fallback.outcome }}"
         if [ "${{ steps.budget.outputs.over }}" = "true" ]; then
           echo "chair: skipped, the pull request is over budget"; exit 0
@@ -707,7 +726,8 @@ runs:
         if [ "$P" = "success" ]; then echo "chair: primary token succeeded"; exit 0; fi
         if [ "$B" = "success" ]; then echo "chair: primary did not review ($P); backup token succeeded"; exit 0; fi
         if [ "$T" = "success" ]; then echo "chair: primary and backup failed; third token succeeded"; exit 0; fi
+        if [ "$Q" = "success" ]; then echo "chair: first three tokens failed; fourth token succeeded"; exit 0; fi
         if [ "$F" = "success" ]; then echo "chair: all Claude tokens failed; OpenRouter fallback posted the review"; exit 0; fi
-        echo "chair review failed (primary=$P, backup=${B:-skipped}, third=${T:-skipped}, fallback=${F:-skipped})"
-        echo "probe: token_1=${{ steps.chair_probe.outputs.token_1 }} token_2=${{ steps.chair_probe.outputs.token_2 }} token_3=${{ steps.chair_probe.outputs.token_3 }}"
+        echo "chair review failed (primary=$P, backup=${B:-skipped}, third=${T:-skipped}, fourth=${Q:-skipped}, fallback=${F:-skipped})"
+        echo "probe: token_1=${{ steps.chair_probe.outputs.token_1 }} token_2=${{ steps.chair_probe.outputs.token_2 }} token_3=${{ steps.chair_probe.outputs.token_3 }} token_4=${{ steps.chair_probe.outputs.token_4 }}"
         exit 1

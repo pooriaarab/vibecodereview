@@ -45,6 +45,7 @@ jobs:
           claude_code_oauth_token: \${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           claude_code_oauth_token_2: \${{ secrets.CLAUDE_CODE_OAUTH_TOKEN_2 }}
           claude_code_oauth_token_3: \${{ secrets.CLAUDE_CODE_OAUTH_TOKEN_3 }}
+          claude_code_oauth_token_4: \${{ secrets.CLAUDE_CODE_OAUTH_TOKEN_4 }}
           github_token: \${{ github.token }}
           openai_api_key: \${{ secrets.OPENAI_API_KEY }}
           gemini_api_key: \${{ secrets.GEMINI_API_KEY }}
