@@ -58,7 +58,12 @@ const WORKFLOW_YAML =
     'on:',
     '  pull_request:',
     '    types: [opened, synchronize, review_requested]',
-    '    paths-ignore: ["**.md", "docs/**"]',
+    // VISION.md is what the council reads to judge whether every OTHER pull
+    // request belongs in the repo, so the markdown skip made it the one file
+    // the council never saw — and the one file it could never approve. A later
+    // negative pattern re-includes a path an earlier one ignored, so a README
+    // typo still costs nothing.
+    '    paths-ignore: ["**.md", "docs/**", "!VISION.md"]',
     'concurrency:',
     '  group: vibecodereview-${{ github.event.pull_request.number }}',
     '  cancel-in-progress: true',
