@@ -325,6 +325,22 @@ runs:
            issues, fix them (Edit/Write), then:
            `git add -A && git commit -m "fix: <what>" && git push origin __BRANCH__`
            Do NOT push style-only or speculative changes.
+           NEVER add a `Co-Authored-By:` trailer, or any trailer naming a model or an agent.
+           The fleet PR standard rejects model attribution in commit messages, so a repo that
+           enforces `pr-standards` fails its own review bot and the PR cannot merge until a
+           human squashes your commit away. Attribution belongs in the PR body as
+           `Assisted-by:`, which the author writes, not you.
+        5b. PR-STANDARD LENS. If the repo has `.github/pr-standards.json`, this PR is subject
+           to the fleet standard: a `<prefix>-<issue>-<slug>` branch, a `[PREFIX-<issue>]
+           <imperative subject>` title, a body with exactly one `Closes #<issue>` plus
+           `## What`, `## Why`, and a `## How I verified` that names a real command and its
+           result, ending in `Assisted-by:`. Hard caps: 500 counted lines and 40 counted
+           files (lockfiles, build output, snapshots, generated code and migrations do not
+           count). Report violations as Major findings.
+           Over a cap is NOT something you fix. Do not delete work to fit, and do not push a
+           fix that would carry the PR over: your own commits count. Say it is over, name the
+           concrete split — which files or which concern belongs in a follow-up PR, and in
+           what order they should land — and leave the work in place for the author.
         6. Assign severity yourself (council members do not rate it): Critical (security, crash,
            data loss), Major (real bug / convention violation), Minor (rest). Post Major+ inline,
            roll Minor into the summary, cap ~8 inline comments. Submit ONE review with
