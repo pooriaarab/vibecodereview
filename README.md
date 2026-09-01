@@ -21,15 +21,15 @@ verdict, self-healing fix.
 
 ## The council
 
-| Member | Provider (called directly) | Secret | Lens |
-| --- | --- | --- | --- |
-| Chair | Claude (subscription OAuth) | `CLAUDE_CODE_OAUTH_TOKEN` | synthesis + conventions + tests + proof + fixes |
-| GPT / Codex | api.openai.com | `OPENAI_API_KEY` | correctness, silent failures |
-| Gemini | generativelanguage.googleapis.com | `GEMINI_API_KEY` | performance, type design |
-| Kimi | api.moonshot.ai | `MOONSHOT_API_KEY` | security |
-| Grok / DeepSeek | openrouter.ai | `OPENROUTER_API_KEY` | maintainability, data integrity |
-| GPT-5.6 (scope) | openrouter.ai | `OPENROUTER_API_KEY` | scope, atomicity, and the evidence in the body |
-| Sonnet (mutation) | openrouter.ai | `OPENROUTER_API_KEY` | can these tests fail at all — **off by default** |
+| Member            | Provider (called directly)        | Secret                    | Lens                                             |
+| ----------------- | --------------------------------- | ------------------------- | ------------------------------------------------ |
+| Chair             | Claude (subscription OAuth)       | `CLAUDE_CODE_OAUTH_TOKEN` | synthesis + conventions + tests + proof + fixes  |
+| GPT / Codex       | api.openai.com                    | `OPENAI_API_KEY`          | correctness, silent failures                     |
+| Gemini            | generativelanguage.googleapis.com | `GEMINI_API_KEY`          | performance, type design                         |
+| Kimi              | api.moonshot.ai                   | `MOONSHOT_API_KEY`        | security                                         |
+| Grok / DeepSeek   | openrouter.ai                     | `OPENROUTER_API_KEY`      | maintainability, data integrity                  |
+| GPT-5.6 (scope)   | openrouter.ai                     | `OPENROUTER_API_KEY`      | scope, atomicity, and the evidence in the body   |
+| Sonnet (mutation) | openrouter.ai                     | `OPENROUTER_API_KEY`      | can these tests fail at all — **off by default** |
 
 A member with no key drops out. No key at all → the council step is skipped, and
 Claude still reviews alone. Nothing here blocks the PR on a provider outage. The scope lens reads the PR's title, body, and linked issues from `PR_CONTEXT_FILE` when available to verify the diff matches the author's claim.
@@ -78,7 +78,7 @@ overrides (`OPENROUTER_MODEL=deepseek/deepseek-v4-flash`, etc.).
 ### The mutation lens
 
 ```yaml
-    mutation_lens: "true"
+mutation_lens: "true"
 ```
 
 Five lenses read the diff. This sixth one reads the **tests** and asks the
@@ -152,7 +152,7 @@ No `CUSTOM_BASE_URL` → the member skips with a note, same as a missing key.
 ## What a fix cycle costs
 
 When the chair pushes a fix, that is a real commit on the PR branch, so GitHub
-raises a `synchronize` event. Every *other* workflow in the repo that triggers on
+raises a `synchronize` event. Every _other_ workflow in the repo that triggers on
 `pull_request` runs again. The cost does not show up against this action — it
 shows up as extra runs of your test, lint, build and e2e workflows.
 
@@ -183,10 +183,10 @@ converging, and a seventh costs what the first cost.
 
 Two ceilings stop it. Both default on:
 
-| Input | Default | Counts |
-|---|---|---|
-| `max_council_runs` | `6` | completed runs of this workflow on the pull request |
-| `max_branch_runs` | `60` | runs of every workflow in the repo on the branch |
+| Input              | Default | Counts                                              |
+| ------------------ | ------- | --------------------------------------------------- |
+| `max_council_runs` | `6`     | completed runs of this workflow on the pull request |
+| `max_branch_runs`  | `60`    | runs of every workflow in the repo on the branch    |
 
 Set either to `0` to disable it.
 

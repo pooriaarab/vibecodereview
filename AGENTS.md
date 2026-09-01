@@ -19,6 +19,7 @@ never fork its provider/lens logic into the surfaces.
   thing is defined exactly once and the engine imports it. They exist because
   `max-lines` caps a file at 300 and the budget is not negotiable. Add a member
   or a lens in `council-config.mjs`; add nothing to a surface.
+
 - `action.yml` — shallow checkout → council fan-out (started in the background,
   collected just before the chair, so setup runs inside its latency) →
   `anthropics/claude-code-action@v1` (the chair: verifies, fixes, pushes, posts
@@ -53,10 +54,10 @@ never fork its provider/lens logic into the surfaces.
 
 Two tags per release, never one.
 
-| Tag | Mutable | Who follows it |
-|---|---|---|
-| `vX.Y.Z` | never moved | anyone who pins a version, and rollback |
-| `vX` | force-moved to the newest `vX.Y.Z` | the ~80 repos whose workflow says `@v1` |
+| Tag      | Mutable                            | Who follows it                          |
+| -------- | ---------------------------------- | --------------------------------------- |
+| `vX.Y.Z` | never moved                        | anyone who pins a version, and rollback |
+| `vX`     | force-moved to the newest `vX.Y.Z` | the ~80 repos whose workflow says `@v1` |
 
     node bin/release.mjs 1.2.0            # dry run, prints the plan
     node bin/release.mjs 1.2.0 --apply    # create v1.2.0, move v1 to it

@@ -401,7 +401,6 @@ runs:
           echo "VCR_OUT_EOF"
         } >> "$GITHUB_OUTPUT"
 
-
     # Probe the chair tokens before paying for an attempt.
     #
     # A chair attempt costs ~12s of claude-code-action setup (Bun, dependencies,
