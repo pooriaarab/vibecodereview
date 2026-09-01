@@ -61,6 +61,38 @@ check false 'a different workflow path does not count'  "$(guard "$(many 6 .gith
 # "out of budget" would stop every review in the fleet on one bad request.
 check false 'an empty run list is not over budget'      "$(guard '{"workflow_runs":[]}' 6 60)"
 
+# The fetcher must replace output from a failed or malformed API response.
+# Appending fallback JSON creates two documents and crashes the guard.
+mkdir -p "$WORK/bin"
+cat > "$WORK/bin/gh" <<'SH'
+#!/usr/bin/env bash
+case "$GH_CASE" in
+  failed) printf '%s' '{"workflow_runs":[{"path":"partial"}]}' ; exit 1 ;;
+  malformed) printf '%s' '{broken' ; exit 0 ;;
+  null_entry) printf '%s' '{"workflow_runs":[null]}' ; exit 0 ;;
+  valid) printf '%s' '{"workflow_runs":[{"path":"kept"}]}' ; exit 0 ;;
+esac
+SH
+chmod +x "$WORK/bin/gh"
+fetch() {
+  GH_CASE="$1" PATH="$WORK/bin:$PATH" \
+    bash "$HERE/fetch-runs-json.sh" "$WORK/fetched.json" o/r feature
+  cat "$WORK/fetched.json"
+}
+check_fetch() {
+  local want="$1" name="$2" got="$3"
+  if [ "$got" = "$want" ]; then printf 'ok    %s\n' "$name"
+  else printf 'FAIL  %s\n' "$name"; fails=$((fails + 1)); fi
+}
+check_fetch '{"workflow_runs":[]}' \
+  'a failed request replaces its response body' "$(fetch failed)"
+check_fetch '{"workflow_runs":[]}' \
+  'a malformed successful response fails open' "$(fetch malformed)"
+check_fetch '{"workflow_runs":[]}' \
+  'a run entry that is not an object fails open' "$(fetch null_entry)"
+check_fetch '{"workflow_runs":[{"path":"kept"}]}' \
+  'a valid response stays unchanged' "$(fetch valid)"
+
 # A run still in progress has not cost a full run yet, and counting it would
 # stop the very review that is running.
 check false 'an in-progress run does not count'         "$(guard '{"workflow_runs":[{"path":".github/workflows/vibecodereview.yml","status":"in_progress","head_branch":"feature"},{"path":".github/workflows/vibecodereview.yml","status":"in_progress","head_branch":"feature"},{"path":".github/workflows/vibecodereview.yml","status":"in_progress","head_branch":"feature"},{"path":".github/workflows/vibecodereview.yml","status":"in_progress","head_branch":"feature"},{"path":".github/workflows/vibecodereview.yml","status":"in_progress","head_branch":"feature"},{"path":".github/workflows/vibecodereview.yml","status":"in_progress","head_branch":"feature"}]}' 6 60)"

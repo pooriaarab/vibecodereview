@@ -207,7 +207,10 @@ runs:
         # branch like "x&branch=some-empty-branch" would otherwise split the
         # query string and silently read as under budget. -f switches gh api to
         # POST unless --method GET is given, and this endpoint is GET-only.
-        RUNS=$(gh api "repos/$VCR_REPO/actions/runs" --method GET -f branch="$VCR_BRANCH" -f per_page=100 2>/dev/null || echo '{"workflow_runs":[]}')
+        RUNS_FILE="$RUNNER_TEMP/vcr-runs.json"
+        bash "${{ github.action_path }}/scripts/fetch-runs-json.sh" \
+          "$RUNS_FILE" "$VCR_REPO" "$VCR_BRANCH"
+        RUNS=$(cat "$RUNS_FILE")
         printf '%s' "$RUNS" | python3 -c '
         import json, os, sys
         # github.workflow is the display name in the workflow file, which is not
