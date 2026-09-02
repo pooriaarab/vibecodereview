@@ -670,10 +670,12 @@ runs:
         esac
         MEMBERS=0
         if [ -f council-findings.md ]; then
-          # grep -c exits 1 (but still prints "0") on zero matches, so a plain
-          # `|| echo 0` fallback ran BOTH commands and doubled the output into
-          # "0\n0" -- a multi-line value that the emitter then rejected outright.
-          MEMBERS=$(grep -cE '^## .+ — .+ lens' council-findings.md 2>/dev/null)
+          # grep -c exits 1 (but still prints "0") on zero matches. GitHub's
+          # bash shell runs with `set -eo pipefail`, and a failing command
+          # substitution in an assignment aborts the step right there -- even
+          # inside this `if` body -- which would skip the emit below entirely.
+          # `|| true` keeps the "0" stdout but neutralizes the exit status.
+          MEMBERS=$(grep -cE '^## .+ — .+ lens' council-findings.md 2>/dev/null || true)
           MEMBERS=${MEMBERS:-0}
         fi
         # Anchored to the exact header the engine emits for a cached member
