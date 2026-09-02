@@ -135,5 +135,5 @@ if (tagExists) {
 
 // Pull the new tags back into the local checkout so verification commands like
 // `git show vX.Y.Z:package.json` and `git merge-base` work immediately.
-git(["fetch", REMOTE, "--tags"]);
+git(["fetch", REMOTE, "--tags", "--force"]);
 console.log(`\nNow write the release notes:\n  gh release create ${tag} --repo ${REPO} --title "${tag}" --notes "..."`);
