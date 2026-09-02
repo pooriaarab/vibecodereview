@@ -83,6 +83,10 @@ inputs:
     description: "Optional JSON object mapping each lens to a regex or array of regexes for paths it should skip. Empty by default: no path-based lens skipping. Keep filters per-lens; security has no built-in executable-file allowlist."
     required: false
     default: ""
+  vibetrace_ingest_url:
+    description: "Optional POST endpoint for vibetrace review.council records. When unset, the emit step writes JSONL under RUNNER_TEMP and never fails the review."
+    required: false
+    default: ""
 
 runs:
   using: "composite"
@@ -351,6 +355,7 @@ runs:
         fi
         printf '%s\n' "$REVIEW_HEAD_SHA" > "$RUNNER_TEMP/vcr-review-head-sha"
         printf 'VCR_REVIEW_HEAD_SHA=%s\n' "$REVIEW_HEAD_SHA" >> "$GITHUB_ENV"
+        printf 'VCR_MEMBER_DIFF_NOTE=%s\n' "$MEMBER_DIFF_NOTE" >> "$GITHUB_ENV"
         export COUNCIL_MEMBER_DIFF_FILE="$PWD/pr-delta.diff"
         export VCR_REVIEW_HEAD_SHA="$REVIEW_HEAD_SHA"
         export VCR_MEMBER_DIFF_NOTE="$MEMBER_DIFF_NOTE"
@@ -632,6 +637,7 @@ runs:
         done
 
     - name: Council fan-out (await)
+      id: council_await
       shell: bash
       continue-on-error: true
       run: |
@@ -648,6 +654,51 @@ runs:
         fi
         cat council.log || true
         echo "----- council-findings.md -----"; cat council-findings.md || true
+
+    # Observability only. Silent-fail inside the script. Never gates the review.
+    - name: Emit vibetrace review.council
+      if: always() && steps.budget.outputs.over != 'true'
+      continue-on-error: true
+      shell: bash
+      env:
+        VIBETRACE_INGEST_URL: ${{ inputs.vibetrace_ingest_url }}
+        GITHUB_REPOSITORY: ${{ github.repository }}
+        VCR_PR: ${{ github.event.pull_request.number }}
+        GITHUB_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        VCR_PR_BODY: ${{ github.event.pull_request.body }}
+        VCR_MEMBER_DIFF_NOTE: ${{ env.VCR_MEMBER_DIFF_NOTE }}
+      run: |
+        MODE=full
+        case "${VCR_MEMBER_DIFF_NOTE:-}" in
+          delta*) MODE=delta ;;
+        esac
+        MEMBERS=0
+        if [ -f council-findings.md ]; then
+          # grep -c exits 1 (but still prints "0") on zero matches. GitHub's
+          # bash shell runs with `set -eo pipefail`, and a failing command
+          # substitution in an assignment aborts the step right there -- even
+          # inside this `if` body -- which would skip the emit below entirely.
+          # `|| true` keeps the "0" stdout but neutralizes the exit status.
+          MEMBERS=$(grep -cE '^## .+ — .+ lens' council-findings.md 2>/dev/null || true)
+          MEMBERS=${MEMBERS:-0}
+        fi
+        # Anchored to the exact header the engine emits for a cached member
+        # (`## Name — lens lens (cached)`); a bare substring search would also
+        # match a finding that happens to quote that text from the diff.
+        CACHE_HIT=0
+        if [ -f council-findings.md ] && grep -qE '^## .+ lens \(cached\)$' council-findings.md 2>/dev/null; then
+          CACHE_HIT=1
+        fi
+        # `job` is a workflow-job context; composite action steps don't receive
+        # it, so `job.status` is always empty here. Read the fan-out step's own
+        # outcome instead, the same way the chair steps are checked below.
+        CANCELLED=0
+        if [ "${{ steps.council_await.outcome }}" = "cancelled" ]; then
+          CANCELLED=1
+        fi
+        node "${{ github.action_path }}/scripts/vibetrace-emit.mjs" review.council \
+          --mode "$MODE" --cache-hit "$CACHE_HIT" --members "$MEMBERS" --cancelled "$CANCELLED"
+
     # Failover chain: each attempt runs the SAME prompt (built once above) with
     # a different subscription. Every attempt costs ~10s of setup even when the
     # token is dead, so order them best-credit-first.
