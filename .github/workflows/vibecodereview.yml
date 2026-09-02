@@ -2,10 +2,6 @@ name: vibecodereview
 on:
   pull_request:
     types: [opened, synchronize, review_requested]
-    # VISION.md is what the council reads to judge whether every OTHER
-    # pull request belongs here, and the markdown skip meant it was the
-    # one file the council never saw. A later negative pattern re-includes
-    # a path an earlier one ignored, so the rest of the markdown still skips.
     # `!` exclusions work with `paths`, not `paths-ignore`, so the negated
     # form still skipped a pull request that changed only VISION.md.
     # Ordered: take everything, drop the markdown and docs, then put
