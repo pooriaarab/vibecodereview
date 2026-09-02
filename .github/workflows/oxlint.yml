@@ -16,5 +16,10 @@ jobs:
         run: bunx oxlint@^1 --config .oxlintrc.json
       # The selfchecks used to run only at publish time, so a broken parser
       # reached every consumer before anything went red. Run them per PR.
-      - name: selfcheck
-        run: npm run selfcheck
+      #
+      # `npm test`, not `npm run selfcheck`: the test script chains into the
+      # selfchecks, so calling the part instead of the aggregate meant every
+      # test file added beside them ran on a developer's machine and never on a
+      # pull request. A test CI does not execute is not verification.
+      - name: test
+        run: npm test

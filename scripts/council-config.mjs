@@ -2,6 +2,10 @@
 // reviews through, and where to reroute a member whose native key is dead.
 // This is data, and keeping it beside the engine pushed council-review.mjs past
 // its file-size budget. One definition still, imported by the one engine.
+// Cache entries are valid only for the prompt contract that produced them.
+// Increment this value whenever a lens or system prompt changes.
+export const PROMPT_VERSION = "1";
+
 export const PROVIDERS = {
   openai: { url: "https://api.openai.com/v1/chat/completions", keyEnv: "OPENAI_API_KEY" },
   gemini: {

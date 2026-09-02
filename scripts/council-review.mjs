@@ -47,6 +47,7 @@ import {
   hasNativeKey,
   callModelWithFallback,
 } from "./council-members.mjs";
+import { cacheKey, loadCouncilResults, saveCouncilResult } from "./council-cache.mjs";
 
 function buildFindingsMarkdown(results, { diffTruncated, contextTruncated, mutationSkipped } = {}) {
   const lines = ["# 🧑‍⚖️ LLM Council findings", ""];
@@ -67,7 +68,8 @@ function buildFindingsMarkdown(results, { diffTruncated, contextTruncated, mutat
     lines.push(`> ℹ️ Mutation lens enabled but not dispatched: ${mutationSkipped}.`, "");
   }
   for (const r of results) {
-    lines.push(`## ${r.model.name} — ${r.model.lens} lens`, "");
+    const cached = r.cached ? " (cached)" : "";
+    lines.push(`## ${r.model.name} — ${r.model.lens} lens${cached}`, "");
     if (r.error) lines.push(`_${r.error}_`, "");
     else lines.push(r.text, "");
   }
@@ -91,6 +93,10 @@ async function main() {
       !md.includes("context") &&
       md.includes("🔴 Critical");
     if (!ok) throw new Error("selfcheck failed:\n" + md);
+    const cachedMd = buildFindingsMarkdown(
+      [{ model: { name: "M1", lens: "security" }, text: "ok", cached: true }],
+    );
+    if (!cachedMd.includes("M1 — security lens (cached)")) throw new Error("selfcheck: cached note missing");
     // Verify context-only truncation message too.
     const mdCtx = buildFindingsMarkdown(
       [{ model: { name: "M1", lens: "correctness" }, text: "ok" }],
@@ -218,18 +224,6 @@ async function main() {
     console.log("No valid council members — skipped.");
     return;
   }
-  // A member is servable if its own key is set OR it can be routed through
-  // OpenRouter. Counting only native keys skipped the whole council on a repo
-  // that had nothing but OPENROUTER_API_KEY, even though every lens was
-  // reachable through it.
-  const servable = models.filter((m) => hasNativeKey(m) || openRouterFallbackFor(m));
-  if (servable.length === 0) {
-    const missing = models.map((m) => PROVIDERS[m.provider]?.keyEnv).join(", ");
-    write(`# 🧑‍⚖️ LLM Council findings\n\n_Council skipped: no provider keys set (${missing})._\n`);
-    console.log("No provider keys — council skipped.");
-    return;
-  }
-
   const diffRaw = diffFile && fs.existsSync(diffFile) ? fs.readFileSync(diffFile, "utf8") : "";
   const { diff, diffTruncated, contextTruncated } = prepareDiff(diffRaw, process.env.PR_CONTEXT_FILE, MAX_DIFF_CHARS);
 
@@ -257,9 +251,30 @@ async function main() {
   }
   if (mutationSkipped) console.log(`Mutation lens enabled but not dispatched: ${mutationSkipped}`);
 
+  // Each successful result gets its own comment so cancellation cannot discard
+  // independently resolved members. The store is durable across runs and is
+  // enabled only after the repository visibility gate permits private storage.
+  const cachedResults = await loadCouncilResults(diff, members);
+  const cacheFor = (member) => cachedResults.get(cacheKey(diff, member));
+  const servable = members.filter((m) => cacheFor(m) || hasNativeKey(m) || openRouterFallbackFor(m));
+  if (servable.length === 0) {
+    const missing = members.map((m) => PROVIDERS[m.provider]?.keyEnv).join(", ");
+    write(`# 🧑‍⚖️ LLM Council findings\n\n_Council skipped: no provider keys set (${missing})._\n`);
+    console.log("No provider keys — council skipped.");
+    return;
+  }
+
   console.log(`Council: ${members.map((m) => `${m.name} [${m.provider}]`).join(", ")}`);
   const councilStartedAt = Date.now();
-  const results = await Promise.all(members.map((m) => callModelWithFallback(m, diff)));
+  const results = await Promise.all(members.map(async (m) => {
+    const key = cacheKey(diff, m);
+    const cached = cachedResults.get(key);
+    if (cached) return { model: cached.model, text: cached.text, cached: true };
+    if (!hasNativeKey(m) && !openRouterFallbackFor(m)) return callModelWithFallback(m, diff);
+    const result = await callModelWithFallback(m, diff);
+    if (!result.error) await saveCouncilResult(key, result);
+    return result;
+  }));
   for (const r of results) {
     const took = r.ms === undefined ? "" : ` (${(r.ms / 1000).toFixed(1)}s)`;
     console.log(`- ${r.model.name}${took}: ${r.error ? "SKIP/ERR " + r.error : "ok"}`);

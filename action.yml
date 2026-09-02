@@ -249,6 +249,7 @@ runs:
       continue-on-error: true
       env:
         GH_TOKEN: ${{ inputs.github_token }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
         OPENAI_API_KEY: ${{ inputs.openai_api_key }}
         GEMINI_API_KEY: ${{ inputs.gemini_api_key }}
         MOONSHOT_API_KEY: ${{ inputs.moonshot_api_key }}
@@ -672,6 +673,24 @@ runs:
         PR_CONTEXT_FILE: ${{ runner.temp }}/pr-context.txt
         VCR_REQUIRE_PROOF: ${{ inputs.require_proof }}
       run: node "${{ github.action_path }}/scripts/chair-fallback.mjs" pr.diff council-findings.md
+
+    # A completed chair review no longer needs the per-member cache comments;
+    # remove them after the final review is posted. A failed cleanup is
+    # deliberately non-fatal, like every other cache operation.
+    - name: Clear council cache
+      if: >-
+        steps.budget.outputs.over != 'true' &&
+        (steps.chair_primary.outcome == 'success' ||
+         steps.chair_backup.outcome == 'success' ||
+         steps.chair_third.outcome == 'success' ||
+         steps.chair_fourth.outcome == 'success' ||
+         steps.chair_fallback.outcome == 'success')
+      continue-on-error: true
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github_token }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+      run: node --input-type=module -e 'import(process.argv[1]).then(({ clearCouncilResults }) => clearCouncilResults())' "${{ github.action_path }}/scripts/council-cache.mjs"
 
     # A budget stop is a routing decision, not a verdict on the code, so it
     # leaves a comment and a label rather than a red check. It writes ONE
