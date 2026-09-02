@@ -40,6 +40,7 @@ import {
   diffAddsTestLines,
   selfcheckMutationRoster,
 } from "./council-config.mjs";
+import { buildFindingsMarkdown, lensCanReviewDiff } from "./review-delta.mjs";
 import {
   REQUEST_TIMEOUT_MS,
   parseModels,
@@ -48,34 +49,6 @@ import {
   callModelWithFallback,
 } from "./council-members.mjs";
 import { cacheKey, loadCouncilResults, saveCouncilResult } from "./council-cache.mjs";
-
-function buildFindingsMarkdown(results, { diffTruncated, contextTruncated, mutationSkipped } = {}) {
-  const lines = ["# 🧑‍⚖️ LLM Council findings", ""];
-  lines.push(
-    "Independent per-lens reviews from council models. Treat as co-reviewer input: de-dupe, verify each claim against the code, discard false positives, and only fix confidently-real issues.",
-    "",
-  );
-  if (diffTruncated && contextTruncated) {
-    lines.push("> ⚠️ Diff and PR context were truncated for length; council saw the first portion of each.", "");
-  } else if (diffTruncated) {
-    lines.push("> ⚠️ Diff was truncated for length; council saw the first portion only.", "");
-  } else if (contextTruncated) {
-    lines.push("> ⚠️ PR context (title, body, linked issues) was truncated for length; the diff is complete.", "");
-  }
-  // An enabled lens that produced nothing must say why. Silence here reads as
-  // "the mutation lens found nothing", which is the opposite of "it never ran".
-  if (mutationSkipped) {
-    lines.push(`> ℹ️ Mutation lens enabled but not dispatched: ${mutationSkipped}.`, "");
-  }
-  for (const r of results) {
-    const cached = r.cached ? " (cached)" : "";
-    lines.push(`## ${r.model.name} — ${r.model.lens} lens${cached}`, "");
-    if (r.error) lines.push(`_${r.error}_`, "");
-    else lines.push(r.text, "");
-  }
-  return lines.join("\n");
-}
-
 
 async function main() {
   if (process.argv.includes("--selfcheck")) {
@@ -93,10 +66,15 @@ async function main() {
       !md.includes("context") &&
       md.includes("🔴 Critical");
     if (!ok) throw new Error("selfcheck failed:\n" + md);
-    const cachedMd = buildFindingsMarkdown(
-      [{ model: { name: "M1", lens: "security" }, text: "ok", cached: true }],
-    );
-    if (!cachedMd.includes("M1 — security lens (cached)")) throw new Error("selfcheck: cached note missing");
+    const metadata = buildFindingsMarkdown([], {
+      reviewHeadSha: "a".repeat(40),
+      memberDiffNote: "delta since `previous`.",
+      skippedLenses: ["performance"],
+      carriedFindings: "## old finding\n\nKeep this.",
+    });
+    if (!metadata.includes("Reviewed head") || !metadata.includes("Member diff") || !metadata.includes("performance") || !metadata.includes("Findings carried forward")) {
+      throw new Error("selfcheck: delta metadata missing");
+    }
     // Verify context-only truncation message too.
     const mdCtx = buildFindingsMarkdown(
       [{ model: { name: "M1", lens: "correctness" }, text: "ok" }],
@@ -194,7 +172,6 @@ async function main() {
       fs.rmSync(testDir, { recursive: true, force: true });
     }
 
-
     // A CLI-backed seat with no oauth token must skip too, not shell out --
     // even when the ambient env sets one, so the check stays offline.
     const savedToken = process.env.CLAUDE_CODE_OAUTH_TOKEN;
@@ -225,7 +202,16 @@ async function main() {
     return;
   }
   const diffRaw = diffFile && fs.existsSync(diffFile) ? fs.readFileSync(diffFile, "utf8") : "";
+  const memberDiffFile = process.env.COUNCIL_MEMBER_DIFF_FILE;
+  const memberDiffRaw = memberDiffFile && fs.existsSync(memberDiffFile)
+    ? fs.readFileSync(memberDiffFile, "utf8")
+    : diffRaw;
   const { diff, diffTruncated, contextTruncated } = prepareDiff(diffRaw, process.env.PR_CONTEXT_FILE, MAX_DIFF_CHARS);
+  const { diff: memberDiff, diffTruncated: memberDiffTruncated } = prepareDiff(
+    memberDiffRaw,
+    process.env.PR_CONTEXT_FILE,
+    MAX_DIFF_CHARS,
+  );
 
   if (!diff) {
     write("# 🧑‍⚖️ LLM Council findings\n\n_Council skipped: empty diff._\n");
@@ -233,33 +219,54 @@ async function main() {
     return;
   }
 
-  // Composed here rather than beside parseModels, because whether the mutation
-  // member is worth dispatching is a fact about the diff, which does not exist
-  // until it has been read above. Checked against diffRaw, not the (possibly
-  // truncated) `diff` sent to models: on a diff over MAX_DIFF_CHARS whose test
-  // hunks fall past the cutoff, scanning the truncated text would wrongly
-  // report no test lines and silently drop the lens.
-  let { members, mutationSkipped } = withMutationMember(models, diffRaw);
+  // Scope and proof need the whole PR. Other lenses receive only the delta, and
+  // a lens with no applicable changed path must not pay for a no-op call.
+  // Composed here rather than beside parseModels because applicability depends
+  // on the diff read above.
+  let { members, mutationSkipped } = withMutationMember(models, memberDiffRaw);
+  const lensPathFilter = process.env.LENS_PATH_FILTER;
+  const skippedLenses = [...new Set(
+    members.filter((m) => !lensCanReviewDiff(m.lens, memberDiffRaw, lensPathFilter)).map((m) => m.lens),
+  )];
+  members = members.filter((m) => lensCanReviewDiff(m.lens, memberDiffRaw, lensPathFilter));
   // diffRaw only decides whether tests exist ANYWHERE in the PR; it says
   // nothing about whether those test hunks survived truncation into `diff`,
   // which is what the model actually receives. Dispatching on diffRaw's answer
   // while sending the truncated `diff` would burn a call on a member that
   // cannot see the tests it was enabled to review.
-  if (members.some((m) => m.lens === "mutation") && diffTruncated && !diffAddsTestLines(diff)) {
+  if (members.some((m) => m.lens === "mutation") && memberDiffTruncated && !diffAddsTestLines(memberDiff)) {
     members = members.filter((m) => m.lens !== "mutation");
-    mutationSkipped = "the diff was truncated before its added test lines";
+    mutationSkipped = "the member delta was truncated before its added test lines";
   }
   if (mutationSkipped) console.log(`Mutation lens enabled but not dispatched: ${mutationSkipped}`);
+  const priorFindings = process.env.VCR_PRIOR_FINDINGS_FILE && fs.existsSync(process.env.VCR_PRIOR_FINDINGS_FILE)
+    ? fs.readFileSync(process.env.VCR_PRIOR_FINDINGS_FILE, "utf8")
+    : "";
+  const reportOptions = {
+    reviewHeadSha: process.env.VCR_REVIEW_HEAD_SHA,
+    memberDiffNote: process.env.VCR_MEMBER_DIFF_NOTE,
+    skippedLenses,
+    carriedFindings: priorFindings,
+    diffTruncated,
+    contextTruncated,
+    mutationSkipped,
+  };
 
-  // Each successful result gets its own comment so cancellation cannot discard
-  // independently resolved members. The store is durable across runs and is
-  // enabled only after the repository visibility gate permits private storage.
-  const cachedResults = await loadCouncilResults(diff, members);
-  const cacheFor = (member) => cachedResults.get(cacheKey(diff, member));
+  if (members.length === 0) {
+    write(buildFindingsMarkdown([], reportOptions) + "\n\n_Council skipped: no configured lens applies to the member delta._\n");
+    console.log("No applicable council lenses — skipped.");
+    return;
+  }
+  // Cache keys use the exact input each member receives: scope sees the full
+  // pull-request diff, while the other lenses see the reachable delta.
+  const fullLenses = new Set(["scope"]);
+  const memberInput = (m) => fullLenses.has(m.lens) ? diff : memberDiff;
+  const cachedResults = await loadCouncilResults(memberDiff, members, memberInput);
+  const cacheFor = (member) => cachedResults.get(cacheKey(memberInput(member), member));
   const servable = members.filter((m) => cacheFor(m) || hasNativeKey(m) || openRouterFallbackFor(m));
   if (servable.length === 0) {
     const missing = members.map((m) => PROVIDERS[m.provider]?.keyEnv).join(", ");
-    write(`# 🧑‍⚖️ LLM Council findings\n\n_Council skipped: no provider keys set (${missing})._\n`);
+    write(buildFindingsMarkdown([], reportOptions) + `\n\n_Council skipped: no provider keys set (${missing})._\n`);
     console.log("No provider keys — council skipped.");
     return;
   }
@@ -267,11 +274,11 @@ async function main() {
   console.log(`Council: ${members.map((m) => `${m.name} [${m.provider}]`).join(", ")}`);
   const councilStartedAt = Date.now();
   const results = await Promise.all(members.map(async (m) => {
-    const key = cacheKey(diff, m);
+    const key = cacheKey(memberInput(m), m);
     const cached = cachedResults.get(key);
     if (cached) return { model: cached.model, text: cached.text, cached: true };
-    if (!hasNativeKey(m) && !openRouterFallbackFor(m)) return callModelWithFallback(m, diff);
-    const result = await callModelWithFallback(m, diff);
+    if (!hasNativeKey(m) && !openRouterFallbackFor(m)) return callModelWithFallback(m, memberInput(m));
+    const result = await callModelWithFallback(m, memberInput(m));
     if (!result.error) await saveCouncilResult(key, result);
     return result;
   }));
@@ -283,7 +290,27 @@ async function main() {
     `Council wall time: ${((Date.now() - councilStartedAt) / 1000).toFixed(1)}s (timeout ${REQUEST_TIMEOUT_MS / 1000}s)`,
   );
 
-  write(buildFindingsMarkdown(results, { diffTruncated, contextTruncated, mutationSkipped }));
+  const report = buildFindingsMarkdown(results, reportOptions);
+  write(report);
+  if (process.env.VCR_CARRY_FILE) {
+    // Keep a flat list of every candidate from every cycle. The chair decides
+    // which entries are fixed; dropping an older entry here would hide an
+    // unresolved finding merely because the next delta did not repeat it.
+    const current = results.map((r) => `## ${r.model.name} — ${r.model.lens} lens\n\n${r.error ? `_${r.error}_` : r.text}`).join("\n\n");
+    let combined = [current, priorFindings].filter(Boolean).join("\n\n");
+    // The workflow base64-encodes this into a single hidden PR comment, which
+    // GitHub caps at 65536 characters. Newest content (this cycle's own
+    // findings, then the most recently carried ones) sits at the front of
+    // `combined`, so cutting the tail drops the oldest carried text first —
+    // without this cap, an unbounded carry file makes the state-comment write
+    // fail silently (it runs with continue-on-error) and the review boundary
+    // goes stale.
+    const CARRY_CHAR_BUDGET = 45_000;
+    if (combined.length > CARRY_CHAR_BUDGET) {
+      combined = combined.slice(0, CARRY_CHAR_BUDGET) + "\n\n_[older carried findings dropped to keep the review-state comment under GitHub's size limit]_";
+    }
+    fs.writeFileSync(process.env.VCR_CARRY_FILE, combined);
+  }
   console.log(`Wrote ${outFile}`);
 }
 

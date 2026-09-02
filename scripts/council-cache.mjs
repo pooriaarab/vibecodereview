@@ -91,6 +91,13 @@ async function cacheEnabled(config) {
   }
 }
 
+// Shared by the review-state writer as well as the per-member cache. A
+// missing or unreadable visibility response is public, so callers fail closed.
+export async function isRepositoryPrivate() {
+  const config = githubConfig();
+  return Boolean(config && (await cacheEnabled(config)));
+}
+
 async function listCacheComments(config) {
   const cacheComments = [];
   for (let page = 1; ; page += 1) {
@@ -129,11 +136,11 @@ async function deleteCacheComments(config, cacheComments, reason) {
   return deleted;
 }
 
-export async function loadCouncilResults(diff, models) {
+export async function loadCouncilResults(diff, models, inputFor = () => diff) {
   const config = githubConfig();
   if (!config || !(await cacheEnabled(config))) return new Map();
   const expectedKeys = typeof diff === "string" && Array.isArray(models)
-    ? new Set(models.map((model) => cacheKey(diff, model)))
+    ? new Set(models.map((model) => cacheKey(inputFor(model), model)))
     : null;
   const results = new Map();
   try {

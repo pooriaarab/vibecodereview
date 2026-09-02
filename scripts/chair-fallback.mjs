@@ -160,7 +160,7 @@ function verdictFlag(findings, claimed) {
   return claimed === "approve" ? "--approve" : "--comment";
 }
 
-function renderBody(parsed, findings, { diffTruncated } = {}) {
+function renderBody(parsed, findings, { diffTruncated, reviewHeadSha } = {}) {
   const order = { Critical: 0, Major: 1, Minor: 2 };
   const sorted = findings.toSorted((a, b) => (order[a.severity] ?? 3) - (order[b.severity] ?? 3));
   const icon = { Critical: "🔴", Major: "🟠", Minor: "🟡" };
@@ -175,6 +175,7 @@ function renderBody(parsed, findings, { diffTruncated } = {}) {
     parsed.summary || "_No summary._",
     "",
   ];
+  if (reviewHeadSha) lines.push(`> Reviewed head: \`${reviewHeadSha}\`.`, "");
   if (diffTruncated) {
     lines.push("> ⚠️ The diff was truncated for length; this review covers the first portion only.", "");
   }
@@ -285,7 +286,10 @@ async function main() {
   if (!parsed.summary?.trim() && findings.length === 0) {
     throw new Error("chair reply had neither a summary nor any findings");
   }
-  const body = renderBody(parsed, findings, { diffTruncated });
+  const body = renderBody(parsed, findings, {
+    diffTruncated,
+    reviewHeadSha: process.env.VCR_REVIEW_HEAD_SHA,
+  });
   const flag = verdictFlag(findings, parsed.verdict);
 
   fs.writeFileSync("chair-fallback-review.md", body);
