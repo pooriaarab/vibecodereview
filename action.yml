@@ -87,6 +87,10 @@ inputs:
     description: "Optional POST endpoint for vibetrace review.council records. When unset, the emit step writes JSONL under RUNNER_TEMP and never fails the review."
     required: false
     default: ""
+  vibetrace_ingest_token:
+    description: "Optional Bearer token for authorization at the vibetrace_ingest_url. When unset, POST requests are sent without an Authorization header."
+    required: false
+    default: ""
 
 runs:
   using: "composite"
@@ -662,6 +666,7 @@ runs:
       shell: bash
       env:
         VIBETRACE_INGEST_URL: ${{ inputs.vibetrace_ingest_url }}
+        VIBETRACE_INGEST_TOKEN: ${{ inputs.vibetrace_ingest_token }}
         GITHUB_REPOSITORY: ${{ github.repository }}
         VCR_PR: ${{ github.event.pull_request.number }}
         GITHUB_HEAD_REF: ${{ github.event.pull_request.head.ref }}

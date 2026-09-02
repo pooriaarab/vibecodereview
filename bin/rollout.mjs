@@ -42,6 +42,8 @@ const SECRET_NAMES = [
   'GEMINI_API_KEY',
   'MOONSHOT_API_KEY',
   'OPENROUTER_API_KEY',
+  'VIBETRACE_INGEST_URL',
+  'VIBETRACE_INGEST_TOKEN',
 ];
 
 const WORKFLOW_PATH = '.github/workflows/vibecodereview.yml';
@@ -92,6 +94,8 @@ const WORKFLOW_YAML =
     '          gemini_api_key: ${{ secrets.GEMINI_API_KEY }}',
     '          moonshot_api_key: ${{ secrets.MOONSHOT_API_KEY }}',
     '          openrouter_api_key: ${{ secrets.OPENROUTER_API_KEY }}',
+    '          vibetrace_ingest_url: ${{ secrets.VIBETRACE_INGEST_URL }}',
+    '          vibetrace_ingest_token: ${{ secrets.VIBETRACE_INGEST_TOKEN }}',
   ].join('\n') + '\n';
 
 function stderrOf(err) {
