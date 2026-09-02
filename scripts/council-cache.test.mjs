@@ -2,6 +2,7 @@
 import assert from "node:assert/strict";
 import {
   cacheKey,
+  clearCouncilResults,
   loadCouncilResults,
   memberId,
   MAX_COMMENT_BODY_CHARS,
@@ -112,6 +113,25 @@ try {
   await saveCouncilResult(key, { model: member, text: oversizedText });
   assert.ok(MAX_COMMENT_BODY_CHARS < Buffer.byteLength(makeComment(key, oversizedText)));
   assert.equal(oversizedCalls, 0);
+
+  // Cleanup must still delete comments written during an earlier private
+  // spell even after the repository has since gone public: leaving them
+  // behind would make cache comments a permanent disclosure of raw model
+  // output on the now-public repository.
+  const cleanupCalls = [];
+  globalThis.fetch = async (url, options = {}) => {
+    cleanupCalls.push({ url, options });
+    if (url.endsWith("/repos/owner/repo")) return { ok: true, json: async () => ({ private: false }) };
+    if (options.method === "DELETE") return { ok: true };
+    return {
+      ok: true,
+      json: async () => [{ id: 21, user: { login: "github-actions[bot]" }, body: comment }],
+    };
+  };
+  await clearCouncilResults();
+  assert.deepEqual(cleanupCalls.filter(({ options }) => options.method === "DELETE").map(({ url }) => url), [
+    "https://api.github.com/repos/owner/repo/issues/comments/21",
+  ]);
 } finally {
   globalThis.fetch = savedFetch;
   for (const [name, value] of Object.entries(savedEnv)) {

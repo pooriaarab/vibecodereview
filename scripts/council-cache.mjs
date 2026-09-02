@@ -179,8 +179,12 @@ export async function saveCouncilResult(key, result) {
 }
 
 export async function clearCouncilResults() {
+  // Deliberately does not gate on cacheEnabled: a repository can go from
+  // private to public between runs, and any cache comments written while it
+  // was private must still be deletable, or they become a permanent
+  // disclosure of raw model output on the now-public repository.
   const config = githubConfig();
-  if (!config || !(await cacheEnabled(config))) return;
+  if (!config) return;
   try {
     const cacheComments = await listCacheComments(config);
     const deleted = await deleteCacheComments(config, cacheComments, "cleanup");
