@@ -179,6 +179,32 @@ runs:
         # Same semantics as before: a failure to fetch context is a no-op,
         # never an error, and the council still runs.
 
+    # The fix-cycle guard runs before any step that costs money. It reads
+    # local git history only — no API calls — so it is the cheapest guard.
+    - name: Fix-cycle guard
+      id: cycle
+      shell: bash
+      run: |
+        # Count our own consecutive commits at HEAD. After the limit, stop
+        # pushing fixes (comment-only) so review->fix->re-review can't loop
+        # forever.
+        LIMIT="${{ inputs.max_fix_cycles }}"
+        COUNT=0
+        # Only our own commits count against the budget. Matching any *[bot]
+        # author let an unrelated bot (dependabot, another action's self-heal)
+        # sitting at HEAD burn the fix budget and silently turn fixes off.
+        while IFS= read -r AUTHOR; do
+          [ "$AUTHOR" = "vibecodereview[bot]" ] || break
+          COUNT=$((COUNT + 1))
+        done < <(git log --format='%an' -"$((LIMIT + 3))")
+        if [ "$COUNT" -ge "$LIMIT" ] || [ "${{ inputs.can_push_fixes }}" = "false" ]; then
+          echo "can_push=false" >> "$GITHUB_OUTPUT"
+        else
+          echo "can_push=true" >> "$GITHUB_OUTPUT"
+        fi
+        echo "cycles=$COUNT" >> "$GITHUB_OUTPUT"
+        echo "Consecutive bot commits at HEAD: $COUNT (limit $LIMIT)"
+
     # max_fix_cycles caps how often the chair pushes a fix. It caps nothing
     # else, and a fix commit is a `synchronize` event that re-runs every
     # workflow in the repo. So one pull request that will not converge quietly
@@ -241,8 +267,8 @@ runs:
 
     # The council is network-bound and the setup below is not, so start the
     # fan-out here and collect it just before the chair. Everything between the
-    # two steps — the CLI install, the fix-cycle guard, the prompt build — now
-    # runs inside the council's own latency instead of after it.
+    # two steps — the CLI install, the prompt build, the chair probe — now runs
+    # inside the council's own latency instead of after it.
     - name: Council fan-out (start)
       if: steps.budget.outputs.over != 'true'
       shell: bash
@@ -309,30 +335,6 @@ runs:
             https://claude.ai/install.sh -o "$RUNNER_TEMP/install-claude.sh"
           bash "$RUNNER_TEMP/install-claude.sh"
         fi
-
-    - name: Fix-cycle guard
-      id: cycle
-      shell: bash
-      run: |
-        # Count our own consecutive commits at HEAD. After the limit, stop
-        # pushing fixes (comment-only) so review->fix->re-review can't loop
-        # forever.
-        LIMIT="${{ inputs.max_fix_cycles }}"
-        COUNT=0
-        # Only our own commits count against the budget. Matching any *[bot]
-        # author let an unrelated bot (dependabot, another action's self-heal)
-        # sitting at HEAD burn the fix budget and silently turn fixes off.
-        while IFS= read -r AUTHOR; do
-          [ "$AUTHOR" = "vibecodereview[bot]" ] || break
-          COUNT=$((COUNT + 1))
-        done < <(git log --format='%an' -"$((LIMIT + 3))")
-        if [ "$COUNT" -ge "$LIMIT" ] || [ "${{ inputs.can_push_fixes }}" = "false" ]; then
-          echo "can_push=false" >> "$GITHUB_OUTPUT"
-        else
-          echo "can_push=true" >> "$GITHUB_OUTPUT"
-        fi
-        echo "cycles=$COUNT" >> "$GITHUB_OUTPUT"
-        echo "Consecutive bot commits at HEAD: $COUNT (limit $LIMIT)"
 
     # ONE chair prompt, built once into the environment and reused by every
     # failover attempt below. It used to be pasted inline per attempt with a
