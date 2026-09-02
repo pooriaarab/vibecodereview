@@ -40,10 +40,25 @@ const git = (args, opts = {}) => {
   }
 };
 
+// git merge-base --is-ancestor communicates through exit code, not stdout, so
+// it needs its own success/failure check rather than the ok:true "" fallback above.
+const isAncestor = (ancestor, descendant) => {
+  try {
+    execFileSync("git", ["merge-base", "--is-ancestor", ancestor, descendant], { stdio: ["pipe", "pipe", "pipe"] });
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 // Read the remote so the plan and the guard checks are against the same tree
 // the tags will eventually point to. In dry-run mode this fetches refs only;
-// it does not touch the working tree.
-git(["fetch", REMOTE, "--tags"]);
+// it does not touch the working tree. --force refreshes a local vX that a
+// prior release already moved on the remote -- without it, a plain
+// `--tags` fetch exits non-zero ("would clobber existing tag") and the
+// script dies before the plan is even printed, on every checkout that has
+// ever fetched a moving tag this repo later force-moved again.
+git(["fetch", REMOTE, "--tags", "--force"]);
 
 const mainSha = git(["rev-parse", `${REMOTE}/${BRANCH}`]);
 
@@ -118,8 +133,11 @@ if (tagExists) {
   // local changes would be ambiguous with the version bump we are about to make.
   // Refuse rather than resetting a local branch of the same name that has diverged
   // (e.g. unpushed local commits) -- `checkout -B` would otherwise silently rewind it.
+  // A local branch that is merely BEHIND the remote (the common case after someone
+  // else has merged to main) is not divergence -- `checkout -B` only fast-forwards
+  // it there, so only refuse when local is not an ancestor of the remote.
   const localBranchSha = git(["rev-parse", "-q", "--verify", BRANCH], { ok: true });
-  if (localBranchSha && localBranchSha !== mainSha) {
+  if (localBranchSha && localBranchSha !== mainSha && !isAncestor(localBranchSha, mainSha)) {
     console.error(
       `error: local ${BRANCH} (${localBranchSha.slice(0, 7)}) differs from ${REMOTE}/${BRANCH} ` +
         `(${mainSha.slice(0, 7)}); refusing to reset it`,
@@ -159,5 +177,5 @@ if (tagExists) {
 
 // Pull the new tags back into the local checkout so verification commands like
 // `git show vX.Y.Z:package.json` and `git merge-base` work immediately.
-git(["fetch", REMOTE, "--tags"]);
+git(["fetch", REMOTE, "--tags", "--force"]);
 console.log(`\nNow write the release notes:\n  gh release create ${tag} --repo ${REPO} --title "${tag}" --notes "..."`);
