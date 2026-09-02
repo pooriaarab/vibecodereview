@@ -141,13 +141,30 @@ export async function loadCouncilResults(diff, models) {
     const stale = expectedKeys
       ? cacheComments.filter(({ entry }) => !entry || !expectedKeys.has(entry.key))
       : [];
-    if (stale.length > 0) await deleteCacheComments(config, stale, "prune");
+    // Two overlapping runs (e.g. a cancelled run's in-flight save landing
+    // alongside its successor's) can each save the same key. Every duplicate
+    // still matches expectedKeys, so it would never be pruned as stale and
+    // would accumulate as an orphaned comment on every future run. Keep the
+    // first (oldest) comment per key — the same one `results` below keeps —
+    // and prune the rest.
+    const seenKeys = new Set();
+    const duplicates = [];
+    for (const item of cacheComments) {
+      const { entry } = item;
+      if (!entry || (expectedKeys && !expectedKeys.has(entry.key))) continue;
+      if (seenKeys.has(entry.key)) duplicates.push(item);
+      else seenKeys.add(entry.key);
+    }
+    const toPrune = [...stale, ...duplicates];
+    if (toPrune.length > 0) await deleteCacheComments(config, toPrune, "prune");
     for (const { entry } of cacheComments) {
       if (entry && (!expectedKeys || expectedKeys.has(entry.key)) && !results.has(entry.key)) {
         results.set(entry.key, entry);
       }
     }
-    if (stale.length > 0) console.log(`Council cache: pruned ${stale.length} stale result comment(s)`);
+    if (toPrune.length > 0) {
+      console.log(`Council cache: pruned ${stale.length} stale and ${duplicates.length} duplicate result comment(s)`);
+    }
   } catch (error) {
     console.warn(`Council cache unavailable; using live results (${error.message})`);
     return new Map();

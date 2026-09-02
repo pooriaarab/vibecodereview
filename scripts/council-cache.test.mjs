@@ -62,14 +62,19 @@ try {
         { id: 11, user: { login: "github-actions[bot]" }, body: comment },
         { id: 12, user: { login: "github-actions[bot]" }, body: makeComment(staleKey) },
         { id: 13, user: { login: "contributor" }, body: makeComment(staleKey) },
+        // A second save of the same key — e.g. an overlapping run's in-flight
+        // save landing after its successor's — must not survive as an
+        // orphaned duplicate: it can never go stale since its key stays valid.
+        { id: 14, user: { login: "github-actions[bot]" }, body: comment },
       ],
     };
   };
   const loaded = await loadCouncilResults(diff, [member]);
   assert.equal(loaded.size, 1);
   assert.deepEqual(loaded.get(key), { key, model: member, text: "No findings." });
-  assert.deepEqual(calls.filter(({ options }) => options.method === "DELETE").map(({ url }) => url), [
+  assert.deepEqual(calls.filter(({ options }) => options.method === "DELETE").map(({ url }) => url).sort(), [
     "https://api.github.com/repos/owner/repo/issues/comments/12",
+    "https://api.github.com/repos/owner/repo/issues/comments/14",
   ]);
 
   const post = calls.length;
