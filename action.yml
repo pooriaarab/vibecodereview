@@ -249,6 +249,8 @@ runs:
       continue-on-error: true
       env:
         GH_TOKEN: ${{ inputs.github_token }}
+        GITHUB_REPOSITORY: ${{ github.repository }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
         OPENAI_API_KEY: ${{ inputs.openai_api_key }}
         GEMINI_API_KEY: ${{ inputs.gemini_api_key }}
         MOONSHOT_API_KEY: ${{ inputs.moonshot_api_key }}
