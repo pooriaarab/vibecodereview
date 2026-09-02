@@ -52,7 +52,7 @@ inputs:
     required: false
     default: "3"
   checkout_depth:
-    description: "Commits to fetch. The review only ever needs the diff (fetched from the API) plus enough history for the fix-cycle guard, so a full clone is wasted I/O on a large repo. Must exceed max_fix_cycles + 3. Set to 0 for a full clone."
+    description: "Commits to fetch. The chair reads the full diff from the API; council members also need the previous reviewed head when it is in this checkout. Must exceed max_fix_cycles + 3. Set to 0 for a full clone."
     required: false
     default: "50"
   max_council_runs:
@@ -75,14 +75,17 @@ inputs:
     description: "Model for the mutation member, over OpenRouter. Its own env var keeps it from silently repointing the scope or maintainability lens, which ride the same OpenRouter route. It still shares openrouter_api_key with those lenses, so a quota failure on that key still takes out all three."
     required: false
     default: ""
+  lens_path_filter:
+    description: "Optional JSON object mapping each lens to a regex or array of regexes for paths it should skip. Empty by default: no path-based lens skipping. Keep filters per-lens; security has no built-in executable-file allowlist."
+    required: false
+    default: ""
 
 runs:
   using: "composite"
   steps:
-    # A full-history clone is pure waste here: the diff comes from the API and
-    # the only local history the review reads is the handful of commits the
-    # fix-cycle guard counts. On a large repo `fetch-depth: 0` cost ~6s against
-    # ~2s shallow, on every PR, in every repo.
+    # A full-history clone is usually waste here: the diff comes from the API,
+    # and the delta needs only the previous reviewed head plus the commits the
+    # fix-cycle guard counts. A missing previous head fails open to the API diff.
     - name: Checkout PR branch
       uses: actions/checkout@v4
       with:
@@ -261,6 +264,7 @@ runs:
         COUNCIL_TIMEOUT_MS: ${{ inputs.council_timeout_ms }}
         MUTATION_LENS: ${{ inputs.mutation_lens }}
         MUTATION_MODEL: ${{ inputs.mutation_model }}
+        LENS_PATH_FILTER: ${{ inputs.lens_path_filter }}
         PR_CONTEXT_FILE: ${{ runner.temp }}/pr-context.txt
         REQUIRE_PROOF: ${{ inputs.require_proof }}
       run: |
@@ -279,10 +283,76 @@ runs:
         # The commit-trailer hook from "Configure git" needs no entry here:
         # it lives under .git/vcr-hooks, outside the working tree `git add -A`
         # walks.
-        printf '%s\n' /pr.diff /council-findings.md /council.log /council.pid \
+        printf '%s\n' /pr.diff /pr-delta.diff /council-findings.md /council-carry.md /council-carry.next.md /review-state.md /council.log /council.pid \
           /probe.1 /probe.2 /probe.3 /reason.1 /reason.2 /reason.3 \
           >> "$(git rev-parse --git-dir)/info/exclude"
+
+        # Keep the chair's evidence complete, but make council member calls
+        # incremental. The state comment is updated only after a successful
+        # chair, so a failed run never advances the review boundary.
+        REVIEW_HEAD_SHA="$(git rev-parse HEAD)"
+        STATE_LOOKUP_FAILED=false
+        STATE_INVALID=false
+        if ! STATE_BODY="$(gh api --paginate "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" 2>/dev/null \
+          | jq -s -r '[.[][] | select((.user.login == "vibecodereview[bot]" or .user.login == "github-actions[bot]") and ((.body // "") | startswith("<!-- vibecodereview:review-state -->")))] | last | .body // empty')"; then
+          STATE_LOOKUP_FAILED=true
+          STATE_BODY=""
+        fi
+        LAST_REVIEWED_SHA="$(printf '%s\n' "$STATE_BODY" | sed -n 's/^sha://p' | head -n 1)"
+        PRIOR_B64="$(printf '%s\n' "$STATE_BODY" | sed -n 's/^carry://p' | head -n 1)"
+        printf '%s' "$PRIOR_B64" > "$RUNNER_TEMP/vcr-prior-carry.b64"
+        : > council-carry.md
+        if [ -n "$PRIOR_B64" ] && ! printf '%s' "$PRIOR_B64" | base64 --decode > council-carry.md 2>/dev/null; then
+          LAST_REVIEWED_SHA=""
+          PRIOR_B64=""
+          STATE_INVALID=true
+          : > council-carry.md
+          MEMBER_DIFF_NOTE="full pull-request diff (previous review state was corrupt)"
+        fi
         gh pr diff ${{ github.event.pull_request.number }} > pr.diff || true
+        if [ "$STATE_LOOKUP_FAILED" = true ]; then
+          MEMBER_DIFF_NOTE="full pull-request diff (previous review state could not be read)"
+        elif [ "$STATE_INVALID" = true ]; then
+          MEMBER_DIFF_NOTE="full pull-request diff (previous review state was corrupt)"
+        else
+          MEMBER_DIFF_NOTE="full pull-request diff (no prior reviewed SHA)"
+        fi
+        if printf '%s' "$LAST_REVIEWED_SHA" | grep -Eq '^[0-9a-f]{40,64}$' \
+          && git cat-file -e "$LAST_REVIEWED_SHA^{commit}" 2>/dev/null; then
+          if git merge-base --is-ancestor "$LAST_REVIEWED_SHA" "$REVIEW_HEAD_SHA"; then
+            # -c core.quotePath=false: default quoting octal-escapes any
+            # non-ASCII byte in a path (e.g. "café.js" becomes "caf\303\251.js"
+            # wrapped in quotes), which review-delta.mjs's `diff --git a/... b/...`
+            # parser does not unescape. Left on, every lens but scope silently
+            # skips a file whose path holds one of those bytes.
+            if git -c core.quotePath=false diff "$LAST_REVIEWED_SHA..$REVIEW_HEAD_SHA" > pr-delta.diff; then
+              MEMBER_DIFF_NOTE="delta since reviewed head \`$LAST_REVIEWED_SHA\`"
+            else
+              cp pr.diff pr-delta.diff
+              MEMBER_DIFF_NOTE="full pull-request diff (checkout_depth could not produce the delta)"
+            fi
+          else
+            cp pr.diff pr-delta.diff
+            MEMBER_DIFF_NOTE="full pull-request diff (prior reviewed head \`$LAST_REVIEWED_SHA\` is not an ancestor; branch was force-pushed)"
+          fi
+        elif printf '%s' "$LAST_REVIEWED_SHA" | grep -Eq '^[0-9a-f]{40,64}$'; then
+          cp pr.diff pr-delta.diff
+          if gh api "repos/${{ github.repository }}/commits/$LAST_REVIEWED_SHA" >/dev/null 2>&1; then
+            MEMBER_DIFF_NOTE="full pull-request diff (prior reviewed head \`$LAST_REVIEWED_SHA\` was not fetched; checkout_depth is too shallow)"
+          else
+            MEMBER_DIFF_NOTE="full pull-request diff (prior reviewed head \`$LAST_REVIEWED_SHA\` is unreachable; branch was force-pushed)"
+          fi
+        else
+          cp pr.diff pr-delta.diff
+        fi
+        printf '%s\n' "$REVIEW_HEAD_SHA" > "$RUNNER_TEMP/vcr-review-head-sha"
+        printf 'VCR_REVIEW_HEAD_SHA=%s\n' "$REVIEW_HEAD_SHA" >> "$GITHUB_ENV"
+        export COUNCIL_MEMBER_DIFF_FILE="$PWD/pr-delta.diff"
+        export VCR_REVIEW_HEAD_SHA="$REVIEW_HEAD_SHA"
+        export VCR_MEMBER_DIFF_NOTE="$MEMBER_DIFF_NOTE"
+        export VCR_PRIOR_FINDINGS_FILE="$PWD/council-carry.md"
+        export VCR_CARRY_FILE="$PWD/council-carry.next.md"
+        printf '%s\n' /council-carry.next.md >> "$(git rev-parse --git-dir)/info/exclude"
         nohup node "${{ github.action_path }}/scripts/council-review.mjs" \
           pr.diff council-findings.md > council.log 2>&1 &
         echo $! > council.pid
@@ -353,6 +423,7 @@ runs:
         cat > "$RUNNER_TEMP/chair-prompt.txt" <<'VCR_PROMPT_EOF'
         You chair an LLM council reviewing PR #__PR__ in __REPO__.
         Branch: __BRANCH__. Can push fixes: __CANPUSH__ (automated fix cycles so far: __CYCLES__).
+        The council report records the exact reviewed head SHA. Include its `Reviewed head:` line in your review summary.
 
         LOOP GUARD: if "Can push fixes" is false, DO NOT push any commits — leave a review comment only. If a prior cycle already tried to fix an issue and it persists, stop fixing it and flag it for a human instead of pushing again.
 
@@ -366,6 +437,8 @@ runs:
         2. Read `council-findings.md`. Each item is an UNVERIFIED claim, not ground truth.
            For every claim, open the file and read the surrounding code (not just the hunk)
            and confirm it against the real code. De-dupe (same issue from many lenses = one).
+           Findings under `Findings carried forward` came from earlier cycles: re-check them
+           and retain every unresolved one even when the current delta does not contain its lines.
            DISCARD a claim (and note why) if: a linter/type-checker already covers it; the
            failing path is unreachable; it is style/taste/naming; it is pre-existing code this
            diff did not touch; it names no concrete failure trigger; or two lenses contradict
@@ -672,6 +745,7 @@ runs:
         # check still reported green.
         PR_CONTEXT_FILE: ${{ runner.temp }}/pr-context.txt
         VCR_REQUIRE_PROOF: ${{ inputs.require_proof }}
+        VCR_REVIEW_HEAD_SHA: ${{ env.VCR_REVIEW_HEAD_SHA }}
       run: node "${{ github.action_path }}/scripts/chair-fallback.mjs" pr.diff council-findings.md
 
     # A completed chair review no longer needs the per-member cache comments;
@@ -753,3 +827,54 @@ runs:
         echo "chair review failed (primary=$P, backup=${B:-skipped}, third=${T:-skipped}, fourth=${Q:-skipped}, fallback=${F:-skipped})"
         echo "probe: token_1=${{ steps.chair_probe.outputs.token_1 }} token_2=${{ steps.chair_probe.outputs.token_2 }} token_3=${{ steps.chair_probe.outputs.token_3 }} token_4=${{ steps.chair_probe.outputs.token_4 }}"
         exit 1
+
+    # Persist the review boundary and the findings that still need a chair's
+    # verification. Updating one hidden comment avoids adding visible noise to
+    # every self-healing cycle while keeping the state available after checkout.
+    - name: Record review state
+      if: steps.budget.outputs.over != 'true'
+      continue-on-error: true
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github_token }}
+        GITHUB_REPOSITORY: ${{ github.repository }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+        VCR_REPO: ${{ github.repository }}
+        VCR_PR: ${{ github.event.pull_request.number }}
+      run: |
+        set -euo pipefail
+        # council-cache.mjs owns the visibility check. It fails closed when the
+        # repository cannot be identified or GitHub cannot answer.
+        rm -f review-state.md
+        node --input-type=module <<'VCR_STATE_EOF'
+        import fs from "node:fs";
+        import { buildReviewState, shouldWriteReviewState } from "${{ github.action_path }}/scripts/review-delta.mjs";
+        import { isRepositoryPrivate } from "${{ github.action_path }}/scripts/council-cache.mjs";
+
+        if (!shouldWriteReviewState(await isRepositoryPrivate())) {
+          console.log("Review state skipped: repository is public or visibility is unavailable");
+          process.exit(0);
+        }
+
+        const headSha = fs.readFileSync(`${process.env.RUNNER_TEMP}/vcr-review-head-sha`, "utf8").trim();
+        const carryPath = "council-carry.next.md";
+        let carry = fs.existsSync(carryPath) ? fs.readFileSync(carryPath, "utf8") : "";
+        if (!fs.existsSync(carryPath)) {
+          const encoded = fs.existsSync(`${process.env.RUNNER_TEMP}/vcr-prior-carry.b64`)
+            ? fs.readFileSync(`${process.env.RUNNER_TEMP}/vcr-prior-carry.b64`, "utf8").trim()
+            : "";
+          carry = encoded ? Buffer.from(encoded, "base64").toString("utf8") : "";
+        }
+        const state = buildReviewState(headSha, carry);
+        const payload = state.split("\n")[2]?.slice(6) || "";
+        if (payload.includes("\n")) throw new Error("review state payload must be one line");
+        fs.writeFileSync("review-state.md", state);
+        VCR_STATE_EOF
+        if [ ! -s review-state.md ]; then exit 0; fi
+        EXISTING=$(gh api --paginate "repos/$VCR_REPO/issues/$VCR_PR/comments" | jq -s -r \
+          '[.[][] | select((.user.login == "vibecodereview[bot]" or .user.login == "github-actions[bot]") and ((.body // "") | startswith("<!-- vibecodereview:review-state -->")))] | last | .id // empty')
+        if [ -n "$EXISTING" ]; then
+          gh api "repos/$VCR_REPO/issues/comments/$EXISTING" -X PATCH -F body=@review-state.md --silent
+        else
+          gh api "repos/$VCR_REPO/issues/$VCR_PR/comments" -X POST -F body=@review-state.md --silent
+        fi

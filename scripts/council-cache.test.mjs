@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   cacheKey,
   clearCouncilResults,
+  isRepositoryPrivate,
   loadCouncilResults,
   memberId,
   MAX_COMMENT_BODY_CHARS,
@@ -93,9 +94,10 @@ try {
     publicCalls.push({ url, options });
     return { ok: true, json: async () => ({ private: false }) };
   };
+  assert.equal(await isRepositoryPrivate(), false);
   assert.equal((await loadCouncilResults(diff, [member])).size, 0);
   await saveCouncilResult(key, { model: member, text: "No findings." });
-  assert.equal(publicCalls.length, 2);
+  assert.equal(publicCalls.length, 3);
   assert.ok(publicCalls.every(({ url }) => url.endsWith("/repos/owner/repo")));
 
   // An unavailable visibility response is also public, never an invitation to cache.
