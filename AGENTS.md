@@ -61,8 +61,13 @@ Two tags per release, never one.
 | `vX` | force-moved to the newest `vX.Y.Z` | the ~80 repos whose workflow says `@v1` |
 
     node bin/release.mjs 1.2.0            # dry run, prints the plan
-    node bin/release.mjs 1.2.0 --apply    # create v1.2.0, move v1 to it
+    node bin/release.mjs 1.2.0 --apply    # bump package.json, commit, create v1.2.0, move v1
     gh release create v1.2.0 --notes "..."
+
+`--apply` writes the version into `package.json` on `main` and commits it before
+cutting either tag, so the tag's tree and `npm publish` always agree on the
+version. It checks out `main` fresh from the remote first; it refuses to run if a
+local `main` has diverged from the remote instead of resetting it.
 
 The immutable tag is the point. Without it there is no way to say which version
 a repo is on, and no way back except a SHA dug out of `git log`. This repo ran

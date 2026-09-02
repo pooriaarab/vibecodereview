@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -35,7 +35,11 @@ mkdirSync(clone, { recursive: true });
 try {
   git(bare, ["init", "--bare"]);
 
-  git(clone, ["init"]);
+  // Pin the branch name: `git init` falls back to "master" on any system/git
+  // version where `init.defaultBranch` isn't set to "main", which would make
+  // the `push -u origin main` below fail with "src refspec main does not
+  // match any".
+  git(clone, ["init", "-b", "main"]);
   git(clone, ["remote", "add", "origin", bare]);
   git(clone, ["config", "user.email", "release-test@example.com"]);
   git(clone, ["config", "user.name", "Release Test"]);
@@ -92,6 +96,23 @@ try {
   assert.notEqual(older.status, 0, older.stderr);
   assert.ok(older.stderr.includes("not newer"), older.stderr);
   assert.equal(git(clone, ["tag", "-l", "v1.3.2"]), "");
+
+  // Criterion 6: resuming when a prior --apply pushed the branch and created
+  // the local tag but failed to push the tag itself (e.g. a network blip)
+  // must still publish the tag, not error out because package.json already
+  // matches the target version.
+  const bumped = JSON.parse(readFileSync(join(clone, "package.json"), "utf8"));
+  bumped.version = "1.4.0";
+  writeFileSync(join(clone, "package.json"), JSON.stringify(bumped, null, 2) + "\n");
+  git(clone, ["commit", "-am", "Release 1.4.0"]);
+  git(clone, ["push", "origin", "main"]);
+  git(clone, ["tag", "v1.4.0"]); // local only: simulates a tag push that previously failed
+
+  const resumed = runRelease(clone, ["1.4.0", "--apply"]);
+  assert.equal(resumed.status, 0, resumed.stderr);
+  assert.equal(git(bare, ["tag", "-l", "v1.4.0"]), "v1.4.0", "immutable tag was never pushed to the remote");
+  assert.equal(git(bare, ["tag", "-l", "v1"]), "v1");
+  assert.equal(packageVersion(clone, "v1.4.0"), "1.4.0");
 
   console.log("release tests passed");
 } finally {

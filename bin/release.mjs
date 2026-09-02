@@ -106,12 +106,26 @@ if (!apply) {
 
 if (tagExists) {
   console.log(`${tag} already exists at this sha, skipping`);
+  // tagExists only proves a local ref at the right sha -- a prior --apply may have
+  // created the tag locally and then failed to push it (network blip). Pushing it
+  // again is a safe no-op once the remote already has it at this sha.
+  git(["push", REMOTE, tag]);
   // The immutable tag is already correct; make sure the moving major pointer is too.
   git(["tag", "-f", major, mainSha]);
   git(["push", REMOTE, `+refs/tags/${major}`]);
 } else {
   // Check out a clean, up-to-date main. This is the release branch; any uncommitted
   // local changes would be ambiguous with the version bump we are about to make.
+  // Refuse rather than resetting a local branch of the same name that has diverged
+  // (e.g. unpushed local commits) -- `checkout -B` would otherwise silently rewind it.
+  const localBranchSha = git(["rev-parse", "-q", "--verify", BRANCH], { ok: true });
+  if (localBranchSha && localBranchSha !== mainSha) {
+    console.error(
+      `error: local ${BRANCH} (${localBranchSha.slice(0, 7)}) differs from ${REMOTE}/${BRANCH} ` +
+        `(${mainSha.slice(0, 7)}); refusing to reset it`,
+    );
+    process.exit(1);
+  }
   git(["checkout", "-B", BRANCH, `${REMOTE}/${BRANCH}`]);
   if (git(["status", "--short"])) {
     console.error("error: the working tree has uncommitted changes");
@@ -119,13 +133,18 @@ if (tagExists) {
   }
 
   const pkgText = readFileSync(PKG, "utf8");
-  const updated = pkgText.replace(/("version"\s*:\s*")[^"]*(")/, `$1${version}$2`);
-  if (updated === pkgText) {
+  const versionFieldRe = /("version"\s*:\s*")[^"]*(")/;
+  const match = pkgText.match(versionFieldRe);
+  if (!match) {
     console.error("error: could not find a version field to update in package.json");
     process.exit(1);
   }
-  if (updated !== pkgText) {
-    writeFileSync(PKG, updated);
+  // A prior --apply may have pushed this same version bump to main and then failed
+  // before the tag push (see the tagExists branch above for the tag-only half of
+  // this). Comparing the matched value (not just replacing) tells "already at the
+  // target version" apart from "no version field found" so resuming doesn't error.
+  if (match[0] !== `${match[1]}${version}${match[2]}`) {
+    writeFileSync(PKG, pkgText.replace(versionFieldRe, `$1${version}$2`));
     git(["add", PKG]);
     git(["commit", "-m", `Release ${version}`]);
   }
