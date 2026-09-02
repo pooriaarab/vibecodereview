@@ -252,9 +252,9 @@ async function main() {
   if (mutationSkipped) console.log(`Mutation lens enabled but not dispatched: ${mutationSkipped}`);
 
   // Each successful result gets its own comment so cancellation cannot discard
-  // independently resolved members. The store is durable across runs, at the
-  // cost of making the hidden cache public and retaining it with the PR.
-  const cachedResults = await loadCouncilResults();
+  // independently resolved members. The store is durable across runs and is
+  // enabled only after the repository visibility gate permits private storage.
+  const cachedResults = await loadCouncilResults(diff, members);
   const cacheFor = (member) => cachedResults.get(cacheKey(diff, member));
   const servable = members.filter((m) => cacheFor(m) || hasNativeKey(m) || openRouterFallbackFor(m));
   if (servable.length === 0) {

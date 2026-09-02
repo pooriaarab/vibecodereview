@@ -7,6 +7,7 @@ import { PROMPT_VERSION } from "./council-config.mjs";
 
 const CACHE_MARKER = "<!-- vibecodereview:council-result:";
 const PAGE_SIZE = 100;
+export const MAX_COMMENT_BODY_CHARS = 65536;
 
 function githubConfig() {
   const token = process.env.GH_TOKEN?.trim();
@@ -16,9 +17,12 @@ function githubConfig() {
   const [owner, name] = repository.split("/", 2);
   if (!owner || !name) return null;
   const api = process.env.GITHUB_API_URL?.trim() || "https://api.github.com";
+  const repoPath = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`;
   return {
     token,
-    commentsUrl: `${api}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/issues/${pullRequest}/comments`,
+    repositoryUrl: `${api}${repoPath}`,
+    commentsUrl: `${api}${repoPath}/issues/${pullRequest}/comments`,
+    commentUrl: (id) => `${api}${repoPath}/issues/comments/${encodeURIComponent(id)}`,
   };
 }
 
@@ -69,26 +73,81 @@ export function parseCacheComment(body) {
   }
 }
 
-export async function loadCouncilResults() {
-  const config = githubConfig();
-  if (!config) return new Map();
-  const results = new Map();
+async function cacheEnabled(config) {
   try {
-    for (let page = 1; ; page += 1) {
-      const response = await fetch(`${config.commentsUrl}?per_page=${PAGE_SIZE}&page=${page}`, {
+    const response = await fetch(config.repositoryUrl, { headers: headers(config.token) });
+    if (!response.ok) throw new Error(`GitHub API HTTP ${response.status}`);
+    const repository = await response.json();
+    if (typeof repository?.private !== "boolean") throw new Error("GitHub API returned no visibility");
+    if (repository.private) {
+      console.log("Council cache: repository is private; cache enabled");
+      return true;
+    }
+    console.log("Council cache: repository is public; cache disabled");
+    return false;
+  } catch (error) {
+    console.warn(`Council cache: repository visibility unavailable; treating it as public and disabling cache (${error.message})`);
+    return false;
+  }
+}
+
+async function listCacheComments(config) {
+  const cacheComments = [];
+  for (let page = 1; ; page += 1) {
+    const response = await fetch(`${config.commentsUrl}?per_page=${PAGE_SIZE}&page=${page}`, {
+      headers: headers(config.token),
+    });
+    if (!response.ok) throw new Error(`GitHub API HTTP ${response.status}`);
+    const comments = await response.json();
+    if (!Array.isArray(comments)) throw new Error("GitHub API returned invalid comments");
+    for (const comment of comments) {
+      const author = comment?.user?.login;
+      if (author !== "github-actions[bot]" && author !== "vibecodereview[bot]") continue;
+      if (!String(comment?.body || "").startsWith(CACHE_MARKER)) continue;
+      cacheComments.push({ comment, entry: parseCacheComment(comment.body) });
+    }
+    if (comments.length < PAGE_SIZE) break;
+  }
+  return cacheComments;
+}
+
+async function deleteCacheComments(config, cacheComments, reason) {
+  let deleted = 0;
+  await Promise.all(cacheComments.map(async ({ comment }) => {
+    if (comment?.id === undefined || comment?.id === null) return;
+    try {
+      const response = await fetch(config.commentUrl(comment.id), {
+        method: "DELETE",
         headers: headers(config.token),
       });
       if (!response.ok) throw new Error(`GitHub API HTTP ${response.status}`);
-      const comments = await response.json();
-      if (!Array.isArray(comments)) throw new Error("GitHub API returned invalid comments");
-      for (const comment of comments) {
-        const author = comment?.user?.login;
-        if (author !== "github-actions[bot]" && author !== "vibecodereview[bot]") continue;
-        const entry = parseCacheComment(comment?.body);
-        if (entry && !results.has(entry.key)) results.set(entry.key, entry);
-      }
-      if (comments.length < PAGE_SIZE) break;
+      deleted += 1;
+    } catch (error) {
+      console.warn(`Council cache ${reason} unavailable for comment ${comment.id}; continuing (${error.message})`);
     }
+  }));
+  return deleted;
+}
+
+export async function loadCouncilResults(diff, models) {
+  const config = githubConfig();
+  if (!config || !(await cacheEnabled(config))) return new Map();
+  const expectedKeys = typeof diff === "string" && Array.isArray(models)
+    ? new Set(models.map((model) => cacheKey(diff, model)))
+    : null;
+  const results = new Map();
+  try {
+    const cacheComments = await listCacheComments(config);
+    const stale = expectedKeys
+      ? cacheComments.filter(({ entry }) => !entry || !expectedKeys.has(entry.key))
+      : [];
+    if (stale.length > 0) await deleteCacheComments(config, stale, "prune");
+    for (const { entry } of cacheComments) {
+      if (entry && (!expectedKeys || expectedKeys.has(entry.key)) && !results.has(entry.key)) {
+        results.set(entry.key, entry);
+      }
+    }
+    if (stale.length > 0) console.log(`Council cache: pruned ${stale.length} stale result comment(s)`);
   } catch (error) {
     console.warn(`Council cache unavailable; using live results (${error.message})`);
     return new Map();
@@ -102,6 +161,11 @@ export async function saveCouncilResult(key, result) {
   if (!config || result?.error || !isModel(result?.model) || typeof result.text !== "string") return;
   const payload = Buffer.from(JSON.stringify({ model: result.model, text: result.text }), "utf8").toString("base64");
   const body = `${CACHE_MARKER}${key}\n${payload}\n-->`;
+  if (body.length > MAX_COMMENT_BODY_CHARS) {
+    console.warn(`Council cache save skipped: comment body is ${body.length} characters, over the GitHub limit of ${MAX_COMMENT_BODY_CHARS}`);
+    return;
+  }
+  if (!(await cacheEnabled(config))) return;
   try {
     const response = await fetch(config.commentsUrl, {
       method: "POST",
@@ -111,5 +175,17 @@ export async function saveCouncilResult(key, result) {
     if (!response.ok) throw new Error(`GitHub API HTTP ${response.status}`);
   } catch (error) {
     console.warn(`Council cache save unavailable; keeping live result (${error.message})`);
+  }
+}
+
+export async function clearCouncilResults() {
+  const config = githubConfig();
+  if (!config || !(await cacheEnabled(config))) return;
+  try {
+    const cacheComments = await listCacheComments(config);
+    const deleted = await deleteCacheComments(config, cacheComments, "cleanup");
+    if (cacheComments.length > 0) console.log(`Council cache: cleared ${deleted}/${cacheComments.length} result comment(s)`);
+  } catch (error) {
+    console.warn(`Council cache cleanup unavailable; continuing (${error.message})`);
   }
 }
