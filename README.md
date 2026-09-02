@@ -87,6 +87,8 @@ Or wire the action directly:
     gemini_api_key: ${{ secrets.GEMINI_API_KEY }}
     moonshot_api_key: ${{ secrets.MOONSHOT_API_KEY }}
     openrouter_api_key: ${{ secrets.OPENROUTER_API_KEY }}
+    vibetrace_ingest_url: ${{ secrets.VIBETRACE_INGEST_URL }}
+    vibetrace_ingest_token: ${{ secrets.VIBETRACE_INGEST_TOKEN }}
 ```
 
 Swap models without code: `council_models` input, or the `*_MODEL` env
@@ -297,3 +299,4 @@ Exposes one tool, `council_review(diff)`. Provider keys come from the server env
 - Subscriptions (codex-personal, gemini-personal, muse) don't reach a CI runner —
   CI uses each provider's **API key**. Only Claude's OAuth token ports to CI.
 - Rotate any key you paste into a chat or terminal history.
+- **Vibetrace Ingestion**: Supply the optional `VIBETRACE_INGEST_URL` and `VIBETRACE_INGEST_TOKEN` as repository secrets to forward completed council run trace metrics and records to a centralized telemetry ingest server. When unset, telemetry traces are stored under `RUNNER_TEMP` as JSONL files.

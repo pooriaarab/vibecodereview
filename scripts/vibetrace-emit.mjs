@@ -6,7 +6,7 @@
 //   node vibetrace-emit.mjs review.council \
 //     --mode delta|full --cache-hit 0|1 --members N --cancelled 0|1
 //
-// Env (all optional): VIBETRACE_INGEST_URL, VIBETRACE_FILE,
+// Env (all optional): VIBETRACE_INGEST_URL, VIBETRACE_INGEST_TOKEN, VIBETRACE_FILE,
 // GITHUB_REPOSITORY, VCR_PR / GITHUB_PR_NUMBER, GITHUB_HEAD_REF,
 // VCR_ISSUE / OFFROUTER_ISSUE, VCR_PR_BODY
 
@@ -88,13 +88,18 @@ function buildCouncilRecord() {
 
 async function emit(record) {
   const ingest = process.env.VIBETRACE_INGEST_URL?.trim();
+  const token = process.env.VIBETRACE_INGEST_TOKEN?.trim();
   const body = JSON.stringify(record);
   if (ingest) {
     // Bounded so a dead/hanging endpoint can never hold the job open despite
     // the "never blocks the review" contract this script promises.
+    const headers = { "content-type": "application/json" };
+    if (token) {
+      headers["authorization"] = `Bearer ${token}`;
+    }
     const res = await fetch(ingest, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers,
       body,
       signal: AbortSignal.timeout(5000),
     });

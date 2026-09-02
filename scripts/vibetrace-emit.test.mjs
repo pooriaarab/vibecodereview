@@ -115,8 +115,10 @@ if (cancelledRun.status !== 0) {
 
 await new Promise((resolve, reject) => {
   const received = [];
+  const reqHeaders = [];
   const server = http.createServer((req, res) => {
     let body = "";
+    reqHeaders.push(req.headers);
     req.on("data", (chunk) => (body += chunk));
     req.on("end", () => {
       received.push(body);
@@ -130,7 +132,6 @@ await new Promise((resolve, reject) => {
       ["review.council", "--mode", "full", "--cache-hit", "0", "--members", "2", "--cancelled", "0"],
       { VIBETRACE_INGEST_URL: `http://127.0.0.1:${port}/ingest` },
     ).then((ingestRun) => {
-      server.close();
       if (ingestRun.status !== 0) {
         console.error("FAIL ingest exit", ingestRun.status, ingestRun.stderr);
         failed++;
@@ -142,14 +143,48 @@ await new Promise((resolve, reject) => {
         if (rec.type !== "review.council" || rec.memberCount !== 2) {
           console.error("FAIL ingest record shape", rec);
           failed++;
+        } else if (reqHeaders[0].authorization !== undefined) {
+          console.error("FAIL ingest sent authorization header when token unset", reqHeaders[0]);
+          failed++;
         } else if (!/-> ingest$/.test(ingestRun.stdout.trim())) {
           console.error("FAIL ingest destination log", ingestRun.stdout);
           failed++;
         } else {
-          console.log("ok - posts review.council to VIBETRACE_INGEST_URL");
+          console.log("ok - posts review.council to VIBETRACE_INGEST_URL (no token)");
         }
       }
-      resolve();
+
+      runAsync(
+        ["review.council", "--mode", "full", "--cache-hit", "0", "--members", "2", "--cancelled", "0"],
+        {
+          VIBETRACE_INGEST_URL: `http://127.0.0.1:${port}/ingest`,
+          VIBETRACE_INGEST_TOKEN: "secret-token-123",
+        },
+      ).then((ingestRun2) => {
+        server.close();
+        if (ingestRun2.status !== 0) {
+          console.error("FAIL ingest with token exit", ingestRun2.status, ingestRun2.stderr);
+          failed++;
+        } else if (received.length !== 2) {
+          console.error("FAIL ingest with token did not receive a POST", ingestRun2.stdout, ingestRun2.stderr);
+          failed++;
+        } else {
+          const rec = JSON.parse(received[1]);
+          if (rec.type !== "review.council" || rec.memberCount !== 2) {
+            console.error("FAIL ingest record shape (with token)", rec);
+            failed++;
+          } else if (reqHeaders[1].authorization !== "Bearer secret-token-123") {
+            console.error("FAIL ingest with token: bad or missing authorization header", reqHeaders[1]);
+            failed++;
+          } else if (!/-> ingest$/.test(ingestRun2.stdout.trim())) {
+            console.error("FAIL ingest with token destination log", ingestRun2.stdout);
+            failed++;
+          } else {
+            console.log("ok - posts review.council with Authorization Bearer token header");
+          }
+        }
+        resolve();
+      });
     });
   });
   server.on("error", reject);
