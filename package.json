@@ -8,7 +8,7 @@
     "vibecodereview": "bin/vibecodereview.mjs"
   },
   "scripts": {
-    "test": "node scripts/review-delta.test.mjs && node scripts/council-cache.test.mjs && npm run selfcheck",
+    "test": "node scripts/review-delta.test.mjs && node scripts/council-cache.test.mjs && node scripts/vibetrace-emit.test.mjs && npm run selfcheck",
     "selfcheck": "node scripts/council-review.mjs --selfcheck && node scripts/chair-fallback.mjs --selfcheck",
     "mcp": "node mcp/server.mjs"
   },

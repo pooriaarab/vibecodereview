@@ -79,6 +79,10 @@ inputs:
     description: "Optional JSON object mapping each lens to a regex or array of regexes for paths it should skip. Empty by default: no path-based lens skipping. Keep filters per-lens; security has no built-in executable-file allowlist."
     required: false
     default: ""
+  vibetrace_ingest_url:
+    description: "Optional POST endpoint for vibetrace review.council records. When unset, the emit step writes JSONL under RUNNER_TEMP and never fails the review."
+    required: false
+    default: ""
 
 runs:
   using: "composite"
@@ -347,6 +351,7 @@ runs:
         fi
         printf '%s\n' "$REVIEW_HEAD_SHA" > "$RUNNER_TEMP/vcr-review-head-sha"
         printf 'VCR_REVIEW_HEAD_SHA=%s\n' "$REVIEW_HEAD_SHA" >> "$GITHUB_ENV"
+        printf 'VCR_MEMBER_DIFF_NOTE=%s\n' "$MEMBER_DIFF_NOTE" >> "$GITHUB_ENV"
         export COUNCIL_MEMBER_DIFF_FILE="$PWD/pr-delta.diff"
         export VCR_REVIEW_HEAD_SHA="$REVIEW_HEAD_SHA"
         export VCR_MEMBER_DIFF_NOTE="$MEMBER_DIFF_NOTE"
@@ -644,6 +649,38 @@ runs:
         fi
         cat council.log || true
         echo "----- council-findings.md -----"; cat council-findings.md || true
+
+    # Observability only. Silent-fail inside the script. Never gates the review.
+    - name: Emit vibetrace review.council
+      if: always() && steps.budget.outputs.over != 'true'
+      continue-on-error: true
+      shell: bash
+      env:
+        VIBETRACE_INGEST_URL: ${{ inputs.vibetrace_ingest_url }}
+        GITHUB_REPOSITORY: ${{ github.repository }}
+        VCR_PR: ${{ github.event.pull_request.number }}
+        GITHUB_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        VCR_MEMBER_DIFF_NOTE: ${{ env.VCR_MEMBER_DIFF_NOTE }}
+      run: |
+        MODE=full
+        case "${VCR_MEMBER_DIFF_NOTE:-}" in
+          delta*) MODE=delta ;;
+        esac
+        MEMBERS=0
+        if [ -f council-findings.md ]; then
+          MEMBERS=$(grep -cE '^## .+ — .+ lens' council-findings.md 2>/dev/null || echo 0)
+        fi
+        CACHE_HIT=0
+        if [ -f council-findings.md ] && grep -q '(cached)' council-findings.md 2>/dev/null; then
+          CACHE_HIT=1
+        fi
+        CANCELLED=0
+        if [ "${{ job.status }}" = "cancelled" ]; then
+          CANCELLED=1
+        fi
+        node "${{ github.action_path }}/scripts/vibetrace-emit.mjs" review.council \
+          --mode "$MODE" --cache-hit "$CACHE_HIT" --members "$MEMBERS" --cancelled "$CANCELLED"
+
     # Failover chain: each attempt runs the SAME prompt (built once above) with
     # a different subscription. Every attempt costs ~10s of setup even when the
     # token is dead, so order them best-credit-first.
