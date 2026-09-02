@@ -6,3 +6,6 @@ pr.diff
 council.log
 council.pid
 probe.*
+# Cursor cloud — local secrets stay local
+.env.local
+.env.*.local
