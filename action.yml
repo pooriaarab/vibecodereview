@@ -866,8 +866,10 @@ runs:
           carry = encoded ? Buffer.from(encoded, "base64").toString("utf8") : "";
         }
         const state = buildReviewState(headSha, carry);
-        const payload = state.split("\n")[2]?.slice(6) || "";
-        if (payload.includes("\n")) throw new Error("review state payload must be one line");
+        const stateLines = state.split("\n");
+        if (stateLines.length !== 4 || !stateLines[2]?.startsWith("carry:") || stateLines[2].slice(6).includes("\n")) {
+          throw new Error("review state payload must be one line");
+        }
         fs.writeFileSync("review-state.md", state);
         VCR_STATE_EOF
         if [ ! -s review-state.md ]; then exit 0; fi

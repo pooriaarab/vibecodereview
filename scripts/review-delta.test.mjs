@@ -45,6 +45,8 @@ assert.equal(lensCanReviewDiff("security", docsScriptDiff), true);
 
 const state = buildReviewState(sha, "## unresolved\n\nKeep this finding.");
 assert.match(state, new RegExp(`^${REVIEW_STATE_MARKER}`));
+assert.equal(state.split("\n").length, 4);
+assert.equal(state.split("\n")[2].includes("\n"), false);
 assert.deepEqual(parseReviewState(state), {
   sha,
   carry: "## unresolved\n\nKeep this finding.",
