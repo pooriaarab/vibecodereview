@@ -54,12 +54,18 @@ check_count 5 'reviews spread across pages are all counted' \
 check_count 0 'a failed gh call fails open to zero' \
   "$(count '' fail)"
 
-# The arithmetic on top of the count: at/over the ceiling stops the review,
-# a zero ceiling disables the check.
+# The arithmetic on top of the count: at/over the ceiling stops the review, a
+# zero ceiling disables the check, and a non-numeric ceiling is rejected
+# rather than silently disabling the check (the case action.yml's own
+# `[ "$max_council" -gt 0 ]` fails into without tripping `set -e`, because
+# that failure is the condition of an `if`).
 guard() {
   local council="$1" max_council="$2"
   local over=""
   max_council="${max_council:-0}"
+  case "$max_council" in
+    ''|*[!0-9]*) printf 'invalid\n'; return ;;
+  esac
   if [ "$max_council" -gt 0 ] && [ "$council" -ge "$max_council" ]; then
     over="this review has already run $council times on the pull request, and the ceiling is $max_council"
   fi
@@ -69,14 +75,15 @@ guard() {
 check() {
   local want="$1" name="$2" got="$3"
   if [ "$got" = "$want" ]; then printf 'ok    %s\n' "$name"
-  else printf 'FAIL  %s (want over=%s, got over=%s)\n' "$name" "$want" "$got"; fails=$((fails + 1)); fi
+  else printf 'FAIL  %s (want %s, got %s)\n' "$name" "$want" "$got"; fails=$((fails + 1)); fi
 }
 
-check false 'a fresh PR is under budget'                "$(guard 0 3 | grep over= | cut -d= -f2)"
-check false 'one review below the ceiling passes'       "$(guard 2 3 | grep over= | cut -d= -f2)"
-check true  'at the ceiling stops the review'           "$(guard 3 3 | grep over= | cut -d= -f2)"
-check true  'over the ceiling stops the review'         "$(guard 5 3 | grep over= | cut -d= -f2)"
-check false 'a zero ceiling disables the check'         "$(guard 9 0 | grep over= | cut -d= -f2)"
+check over=false 'a fresh PR is under budget'          "$(guard 0 3)"
+check over=false 'one review below the ceiling passes' "$(guard 2 3)"
+check over=true  'at the ceiling stops the review'     "$(guard 3 3)"
+check over=true  'over the ceiling stops the review'   "$(guard 5 3)"
+check over=false 'a zero ceiling disables the check'   "$(guard 9 0)"
+check invalid    'a non-numeric ceiling is rejected'   "$(guard 5 three)"
 
 [ "$fails" = 0 ] || { printf '\n%s failing\n' "$fails" >&2; exit 1; }
 printf '\nall passing\n'

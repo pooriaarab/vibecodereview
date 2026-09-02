@@ -59,7 +59,6 @@ inputs:
     description: "Stop after this many reviews from claude[bot] on one pull request. A PR on its third review is not converging, and a fourth costs the same as the first. Set 0 to disable."
     required: false
     default: "3"
-
   council_timeout_ms:
     description: "Per-member deadline for the council fan-out. Members run in parallel, so this is the council's worst-case wall time. Omit for the 90s default."
     required: false
@@ -185,16 +184,27 @@ runs:
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.github_token }}
+        VCR_REPO: ${{ github.repository }}
+        VCR_PR: ${{ github.event.pull_request.number }}
+        VCR_ACTION_PATH: ${{ github.action_path }}
         VCR_MAX_COUNCIL: ${{ inputs.max_council_runs }}
       run: |
         set -euo pipefail
         # A failed lookup must never stop a review. Degrade to 0, so an API
         # blip reads as "no spend yet" rather than "out of budget".
-        PR_NUM="${{ github.event.pull_request.number }}"
-        REVIEWS=$(bash "${{ github.action_path }}/scripts/budget-guard.sh" \
-          "${{ github.repository }}" "$PR_NUM")
-        council="$REVIEWS"
         max_council="${VCR_MAX_COUNCIL:-0}"
+        # Unlike the API blip above, a misconfigured ceiling must not fail
+        # open: "$max_council" -gt 0 on a non-numeric value fails without
+        # tripping `set -e` (it is the condition of an if), which would
+        # otherwise disable the ceiling silently instead of erroring.
+        case "$max_council" in
+          ''|*[!0-9]*)
+            echo "::error::max_council_runs must be a nonnegative integer, got '$max_council'"
+            exit 1
+            ;;
+        esac
+        REVIEWS=$(bash "$VCR_ACTION_PATH/scripts/budget-guard.sh" "$VCR_REPO" "$VCR_PR")
+        council="$REVIEWS"
         over=""
         if [ "$max_council" -gt 0 ] && [ "$council" -ge "$max_council" ]; then
           over="this review has already run $council times on the pull request, and the ceiling is $max_council"
@@ -653,7 +663,6 @@ runs:
         VCR_PR: ${{ github.event.pull_request.number }}
         VCR_REASON: ${{ steps.budget.outputs.reason }}
         VCR_COUNCIL_RUNS: ${{ steps.budget.outputs.council_runs }}
-
       run: |
         set -euo pipefail
         MARKER="<!-- vibecodereview:budget -->"
@@ -667,7 +676,6 @@ runs:
           echo "The review stopped without running, because $VCR_REASON."
           echo
           echo "- Council runs on this PR: $VCR_COUNCIL_RUNS"
-
           echo
           echo "Nothing here says the code is wrong. It says the automation is not"
           echo "converging, and another cycle costs what the last one cost. Decide:"
