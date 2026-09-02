@@ -62,6 +62,28 @@ if (ok.status !== 0) {
   }
 }
 
+const bodyFile = path.join(tmp, "body-fallback.jsonl");
+const bodyRun = run(
+  ["review.council", "--mode", "full", "--members", "1"],
+  {
+    VIBETRACE_FILE: bodyFile,
+    GITHUB_HEAD_REF: "feature/vibetrace",
+    VCR_PR_BODY: "Some context.\n\nCloses #107\n",
+  },
+);
+if (bodyRun.status !== 0) {
+  console.error("FAIL body-fallback exit", bodyRun.status, bodyRun.stderr);
+  failed++;
+} else {
+  const rec = JSON.parse(fs.readFileSync(bodyFile, "utf8").trim());
+  if (rec.attribution?.issue !== 107) {
+    console.error("FAIL body-fallback issue", rec.attribution);
+    failed++;
+  } else {
+    console.log("ok - falls back to issue number parsed from PR body");
+  }
+}
+
 const bad = run(["review.council", "--mode", "nope", "--members", "1"], { VIBETRACE_FILE: file });
 if (bad.status !== 0) {
   console.error("FAIL bad mode should exit 0", bad.status);

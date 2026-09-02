@@ -661,6 +661,7 @@ runs:
         GITHUB_REPOSITORY: ${{ github.repository }}
         VCR_PR: ${{ github.event.pull_request.number }}
         GITHUB_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        VCR_PR_BODY: ${{ github.event.pull_request.body }}
         VCR_MEMBER_DIFF_NOTE: ${{ env.VCR_MEMBER_DIFF_NOTE }}
       run: |
         MODE=full
@@ -675,8 +676,11 @@ runs:
           MEMBERS=$(grep -cE '^## .+ — .+ lens' council-findings.md 2>/dev/null)
           MEMBERS=${MEMBERS:-0}
         fi
+        # Anchored to the exact header the engine emits for a cached member
+        # (`## Name — lens lens (cached)`); a bare substring search would also
+        # match a finding that happens to quote that text from the diff.
         CACHE_HIT=0
-        if [ -f council-findings.md ] && grep -q '(cached)' council-findings.md 2>/dev/null; then
+        if [ -f council-findings.md ] && grep -qE '^## .+ lens \(cached\)$' council-findings.md 2>/dev/null; then
           CACHE_HIT=1
         fi
         # `job` is a workflow-job context; composite action steps don't receive

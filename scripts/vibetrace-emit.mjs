@@ -8,7 +8,7 @@
 //
 // Env (all optional): VIBETRACE_INGEST_URL, VIBETRACE_FILE,
 // GITHUB_REPOSITORY, VCR_PR / GITHUB_PR_NUMBER, GITHUB_HEAD_REF,
-// VCR_ISSUE / OFFROUTER_ISSUE
+// VCR_ISSUE / OFFROUTER_ISSUE, VCR_PR_BODY
 
 import fs from "node:fs";
 import path from "node:path";
@@ -29,6 +29,15 @@ function parseIssueFromBranch(branch) {
   return Number.isInteger(n) && n > 0 ? n : undefined;
 }
 
+// Matches GitHub's own closing-keyword syntax, e.g. "Closes #107".
+function parseIssueFromBody(body) {
+  if (!body) return undefined;
+  const m = body.match(/\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s*:?\s*#(\d+)/i);
+  if (!m) return undefined;
+  const n = Number(m[1]);
+  return Number.isInteger(n) && n > 0 ? n : undefined;
+}
+
 function attribution() {
   const repo = process.env.GITHUB_REPOSITORY?.trim() || undefined;
   const branch =
@@ -37,9 +46,9 @@ function attribution() {
     undefined;
   const explicit = Number(process.env.VCR_ISSUE || process.env.OFFROUTER_ISSUE || "");
   const issue =
-    Number.isInteger(explicit) && explicit > 0
-      ? explicit
-      : parseIssueFromBranch(branch);
+    (Number.isInteger(explicit) && explicit > 0 ? explicit : undefined) ??
+    parseIssueFromBranch(branch) ??
+    parseIssueFromBody(process.env.VCR_PR_BODY);
   const pr = Number(process.env.VCR_PR || process.env.GITHUB_PR_NUMBER || "");
   const out = {};
   if (repo) out.repo = repo;
