@@ -81,10 +81,13 @@ async function emit(record) {
   const ingest = process.env.VIBETRACE_INGEST_URL?.trim();
   const body = JSON.stringify(record);
   if (ingest) {
+    // Bounded so a dead/hanging endpoint can never hold the job open despite
+    // the "never blocks the review" contract this script promises.
     const res = await fetch(ingest, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body,
+      signal: AbortSignal.timeout(5000),
     });
     if (!res.ok) throw new Error(`ingest HTTP ${res.status}`);
     return "ingest";

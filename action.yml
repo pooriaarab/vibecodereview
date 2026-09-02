@@ -633,6 +633,7 @@ runs:
         done
 
     - name: Council fan-out (await)
+      id: council_await
       shell: bash
       continue-on-error: true
       run: |
@@ -668,14 +669,21 @@ runs:
         esac
         MEMBERS=0
         if [ -f council-findings.md ]; then
-          MEMBERS=$(grep -cE '^## .+ — .+ lens' council-findings.md 2>/dev/null || echo 0)
+          # grep -c exits 1 (but still prints "0") on zero matches, so a plain
+          # `|| echo 0` fallback ran BOTH commands and doubled the output into
+          # "0\n0" -- a multi-line value that the emitter then rejected outright.
+          MEMBERS=$(grep -cE '^## .+ — .+ lens' council-findings.md 2>/dev/null)
+          MEMBERS=${MEMBERS:-0}
         fi
         CACHE_HIT=0
         if [ -f council-findings.md ] && grep -q '(cached)' council-findings.md 2>/dev/null; then
           CACHE_HIT=1
         fi
+        # `job` is a workflow-job context; composite action steps don't receive
+        # it, so `job.status` is always empty here. Read the fan-out step's own
+        # outcome instead, the same way the chair steps are checked below.
         CANCELLED=0
-        if [ "${{ job.status }}" = "cancelled" ]; then
+        if [ "${{ steps.council_await.outcome }}" = "cancelled" ]; then
           CANCELLED=1
         fi
         node "${{ github.action_path }}/scripts/vibetrace-emit.mjs" review.council \
