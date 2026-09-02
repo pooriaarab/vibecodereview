@@ -190,16 +190,9 @@ runs:
         set -euo pipefail
         # A failed lookup must never stop a review. Degrade to 0, so an API
         # blip reads as "no spend yet" rather than "out of budget".
-        # Assign then substitute on failure so stdout and fallback do not
-        # concatenate.
         PR_NUM="${{ github.event.pull_request.number }}"
-        # One page, deliberately. --paginate runs the jq filter per page and
-        # emits one count per page, so "100\n7" would reach the numeric test;
-        # --slurp would fix that but gh rejects it alongside --jq. The ceiling
-        # is a single digit, so 100 reviews is already far more than we need.
-        REVIEWS=$(gh api "repos/${{ github.repository }}/pulls/$PR_NUM/reviews" \
-          --method GET -f per_page=100 \
-          --jq '[.[] | select(.user.login == "claude[bot]")] | length') || REVIEWS=0
+        REVIEWS=$(bash "${{ github.action_path }}/scripts/budget-guard.sh" \
+          "${{ github.repository }}" "$PR_NUM")
         council="$REVIEWS"
         max_council="${VCR_MAX_COUNCIL:-0}"
         over=""
