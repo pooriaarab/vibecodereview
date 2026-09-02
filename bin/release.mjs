@@ -1,18 +1,19 @@
 #!/usr/bin/env node
-// Cut a release: update package.json, commit it, then cut an immutable vX.Y.Z
-// tag and force-move the vX pointer.
+// Cut a release: create an immutable vX.Y.Z tag and force-move the vX pointer.
+// Does not commit package.json. The npm manifest version is written at publish
+// time by .github/workflows/npm-publish.yml, derived from the tag that triggers
+// the run. Git stays the source of truth; npm is a downstream artifact.
 //
 // Two tags, not one. The immutable tag is what makes "which version are we on"
 // and "put it back" answerable; the moving major tag is what the ~80 consuming
 // repos follow to get fixes without editing 80 workflows. Skipping the
-// immutable one leaves no rollback target except a SHA dug out of git log,
+// immutable one leaves no rollback target except a SHA dug out of `git log`,
 // which is where this repo was until v1.0.0 was cut retroactively.
 //
 // Usage:
 //   node bin/release.mjs 1.2.0            # dry run, prints the plan
-//   node bin/release.mjs 1.2.0 --apply
+//   node bin/release.mjs 1.2.0 --apply    # create v1.2.0, move v1 to it
 import { execFileSync } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
 
 const version = process.argv[2];
 const apply = process.argv.includes("--apply");
@@ -27,7 +28,6 @@ const major = `v${majorNum}`;
 const tag = `v${version}`;
 const REMOTE = process.env.RELEASE_REMOTE || "origin";
 const BRANCH = process.env.RELEASE_BRANCH || "main";
-const PKG = "package.json";
 const REPO = "pooriaarab/vibecodereview";
 
 const git = (args, opts = {}) => {
@@ -40,21 +40,30 @@ const git = (args, opts = {}) => {
   }
 };
 
-// Read the remote so the plan and the guard checks are against the same tree
-// the tags will eventually point to. In dry-run mode this fetches refs only;
-// it does not touch the working tree.
+// Never run while the working tree is dirty. The script does not move the
+// caller's HEAD, but it still should not run from an ambiguous checkout.
+if (git(["status", "--short"])) {
+  console.error("error: the working tree has uncommitted changes");
+  process.exit(1);
+}
+
+// Resolve everything against the remote tracking ref. The transport moved from
+// `gh api` to local `git` so this works offline and from a throwaway clone.
 git(["fetch", REMOTE, "--tags"]);
 
 const mainSha = git(["rev-parse", `${REMOTE}/${BRANCH}`]);
 
 const beforeVersion = (() => {
   try {
-    return JSON.parse(git(["show", `${REMOTE}/${BRANCH}:${PKG}`])).version;
+    const remotePkg = git(["show", `${REMOTE}/${BRANCH}:package.json`], { ok: true });
+    return remotePkg ? JSON.parse(remotePkg).version : null;
   } catch {
-    return JSON.parse(readFileSync(PKG, "utf8")).version;
+    return null;
   }
 })();
 
+// Resolve through to the commit (^{}) so an annotated tag compares against the
+// commit sha, not the tag object sha.
 const tagSha = (name) => git(["rev-parse", "-q", "--verify", `refs/tags/${name}^{}`], { ok: true }) || null;
 
 const existingTagSha = tagSha(tag);
@@ -95,7 +104,13 @@ if (highest && cmp(newVer, highest) <= 0) {
 }
 
 console.log(`main      ${mainSha.slice(0, 7)}`);
-console.log(`package.json  ${beforeVersion === version ? `${version} (already)` : `${beforeVersion} -> ${version}`}`);
+if (beforeVersion === version) {
+  console.log(`package.json  ${version} (already)`);
+} else if (beforeVersion) {
+  console.log(`package.json  ${beforeVersion} (npm workflow will set to ${version})`);
+} else {
+  console.log(`package.json  (npm workflow will set to ${version})`);
+}
 console.log(tagExists ? `exists    ${tag} -> ${mainSha.slice(0, 7)} (resuming)` : `create    ${tag} -> ${mainSha.slice(0, 7)}`);
 console.log(`${majorExists ? "move     " : "create   "} ${major} -> ${mainSha.slice(0, 7)}`);
 
@@ -106,35 +121,15 @@ if (!apply) {
 
 if (tagExists) {
   console.log(`${tag} already exists at this sha, skipping`);
-  // The immutable tag is already correct; make sure the moving major pointer is too.
+  // A prior run may have created the local tag but failed to push it. Make sure
+  // the remote has it before we update the major pointer.
+  git(["push", REMOTE, tag]);
   git(["tag", "-f", major, mainSha]);
   git(["push", REMOTE, `+refs/tags/${major}`]);
 } else {
-  // Check out a clean, up-to-date main. This is the release branch; any uncommitted
-  // local changes would be ambiguous with the version bump we are about to make.
-  git(["checkout", "-B", BRANCH, `${REMOTE}/${BRANCH}`]);
-  if (git(["status", "--short"])) {
-    console.error("error: the working tree has uncommitted changes");
-    process.exit(1);
-  }
-
-  const pkgText = readFileSync(PKG, "utf8");
-  const updated = pkgText.replace(/("version"\s*:\s*")[^"]*(")/, `$1${version}$2`);
-  if (updated === pkgText) {
-    console.error("error: could not find a version field to update in package.json");
-    process.exit(1);
-  }
-  if (updated !== pkgText) {
-    writeFileSync(PKG, updated);
-    git(["add", PKG]);
-    git(["commit", "-m", `Release ${version}`]);
-  }
-  const releaseSha = git(["rev-parse", "HEAD"]);
-
-  git(["push", REMOTE, BRANCH]);
-  git(["tag", tag, releaseSha]);
+  git(["tag", tag, mainSha]);
   git(["push", REMOTE, tag]);
-  git(["tag", "-f", major, releaseSha]);
+  git(["tag", "-f", major, mainSha]);
   git(["push", REMOTE, `+refs/tags/${major}`]);
 }
 
