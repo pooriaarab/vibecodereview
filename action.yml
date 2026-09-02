@@ -43,6 +43,10 @@ inputs:
     description: "If true, the chair may commit and push fixes to the PR branch."
     required: false
     default: "true"
+  file_unfixed_findings:
+    description: "If true, a council finding the pull request did not fix is filed as a GitHub issue carrying the triage label. Filed, not scheduled: triage decides whether it is worth doing. Off by default, because a queue of agent-written issues nobody agreed to is worse than none."
+    required: false
+    default: "false"
   require_proof:
     description: "If true, the chair checks that the PR body's evidence matches the diff — a UI change needs before/after screenshots, a command needs its result. Set false in a repo where no change is ever visible. See pr-standards.md in pooriaarab/scripts."
     required: false
@@ -880,3 +884,19 @@ runs:
         else
           gh api "repos/$VCR_REPO/issues/$VCR_PR/comments" -X POST -F body=@review-state.md --silent
         fi
+    - name: File unfixed findings
+      # Runs after the chair, so the findings it reads are the ones that
+      # survived to the final diff. Never fails the review: a finding that could
+      # not be filed is worse read in the review than not reviewed at all.
+      if: ${{ inputs.file_unfixed_findings == 'true' }}
+      shell: bash
+      continue-on-error: true
+      env:
+        GH_TOKEN: ${{ inputs.github_token }}
+      run: |
+        [ -f council-findings.md ] || { echo "no findings file"; exit 0; }
+        node "${{ github.action_path }}/scripts/file-findings.mjs" \
+          --findings council-findings.md \
+          --repo "${{ github.repository }}" \
+          --pr "${{ github.event.pull_request.number }}" \
+          --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
