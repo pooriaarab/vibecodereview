@@ -60,13 +60,9 @@ inputs:
     required: false
     default: "50"
   max_council_runs:
-    description: "Stop after this many completed runs of this workflow on one pull request. A PR on its sixth review is not converging, and a seventh costs the same as the first. Set 0 to disable. The lookback is the API's newest 100 runs on the branch, so values above ~100 may never trigger."
+    description: "Stop after this many reviews from claude[bot] on one pull request. A PR on its third review is not converging, and a fourth costs the same as the first. Set 0 to disable."
     required: false
-    default: "6"
-  max_branch_runs:
-    description: "Stop after every workflow in the repo has, together, run this many times on the pull request's branch. Each fix commit re-runs them all, so this is the number that actually tracks spend. Set 0 to disable. The lookback is the API's newest 100 runs on the branch, so values above 100 will never trigger."
-    required: false
-    default: "60"
+    default: "3"
   council_timeout_ms:
     description: "Per-member deadline for the council fan-out. Members run in parallel, so this is the council's worst-case wall time. Omit for the 90s default."
     required: false
@@ -194,65 +190,47 @@ runs:
         # Same semantics as before: a failure to fetch context is a no-op,
         # never an error, and the council still runs.
 
-    # max_fix_cycles caps how often the chair pushes a fix. It caps nothing
-    # else, and a fix commit is a `synchronize` event that re-runs every
-    # workflow in the repo. So one pull request that will not converge quietly
-    # spends more machine time than ten that do, and no ceiling notices.
-    #
-    # Both ceilings come out of one API call on purpose. Real billable minutes
-    # need a request per run, which turns a guard against waste into a source of
-    # it. Run counts are the cheap proxy: every run of a workflow costs about
-    # what the last one did.
+    # The council runs once per review. Counting claude[bot] reviews on the
+    # pull request replaces the old workflow-run count, which needed the
+    # actions: read permission that 79 of 81 consumer workflows did not grant.
+    # pull-requests: read is always available.
     - name: Budget guard
       id: budget
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.github_token }}
         VCR_REPO: ${{ github.repository }}
-        VCR_BRANCH: ${{ github.event.pull_request.head.ref }}
-        VCR_WORKFLOW_REF: ${{ github.workflow_ref }}
+        VCR_PR: ${{ github.event.pull_request.number }}
+        VCR_ACTION_PATH: ${{ github.action_path }}
         VCR_MAX_COUNCIL: ${{ inputs.max_council_runs }}
-        VCR_MAX_BRANCH: ${{ inputs.max_branch_runs }}
       run: |
         set -euo pipefail
-        # A failed lookup must never stop a review. Degrade to an empty list, so
-        # an API blip reads as "no spend yet" rather than "out of budget".
-        # branch is passed as a -f parameter, not interpolated into the query
-        # string: a branch name may legally contain "&" (git allows it), and a
-        # branch like "x&branch=some-empty-branch" would otherwise split the
-        # query string and silently read as under budget. -f switches gh api to
-        # POST unless --method GET is given, and this endpoint is GET-only.
-        RUNS_FILE="$RUNNER_TEMP/vcr-runs.json"
-        bash "${{ github.action_path }}/scripts/fetch-runs-json.sh" \
-          "$RUNS_FILE" "$VCR_REPO" "$VCR_BRANCH"
-        RUNS=$(cat "$RUNS_FILE")
-        printf '%s' "$RUNS" | python3 -c '
-        import json, os, sys
-        # github.workflow is the display name in the workflow file, which is not
-        # unique in a repo; identify by path (from workflow_ref) instead, so a
-        # second workflow that happens to share the name is never counted.
-        workflow_path = os.environ["VCR_WORKFLOW_REF"].split("@")[0].removeprefix(os.environ["VCR_REPO"] + "/")
-        runs = [r for r in (json.load(sys.stdin).get("workflow_runs") or [])
-                if r.get("head_branch") == os.environ["VCR_BRANCH"]
-                and r.get("status") == "completed"]
-        council = sum(1 for r in runs
-                      if r.get("path") == workflow_path)
-        max_council = int(os.environ["VCR_MAX_COUNCIL"] or 0)
-        max_branch = int(os.environ["VCR_MAX_BRANCH"] or 0)
-        over = ""
-        if max_council and council >= max_council:
-            over = f"this review has already run {council} times on the pull request, and the ceiling is {max_council}"
-        elif max_branch and len(runs) >= max_branch:
-            over = f"the workflows in this repo have run {len(runs)} times on the branch, and the ceiling is {max_branch}"
-        with open(os.environ["GITHUB_OUTPUT"], "a") as out:
-            out.write(f"over={str(bool(over)).lower()}\n")
-            out.write(f"council_runs={council}\n")
-            out.write(f"branch_runs={len(runs)}\n")
-            out.write(f"reason={over}\n")
-        print(f"council runs: {council}/{max_council}   branch runs: {len(runs)}/{max_branch}")
-        if over:
-            print("Over budget: " + over)
-        '
+        # A failed lookup must never stop a review. Degrade to 0, so an API
+        # blip reads as "no spend yet" rather than "out of budget".
+        max_council="${VCR_MAX_COUNCIL:-0}"
+        # Unlike the API blip above, a misconfigured ceiling must not fail
+        # open: "$max_council" -gt 0 on a non-numeric value fails without
+        # tripping `set -e` (it is the condition of an if), which would
+        # otherwise disable the ceiling silently instead of erroring.
+        case "$max_council" in
+          ''|*[!0-9]*)
+            echo "::error::max_council_runs must be a nonnegative integer, got '$max_council'"
+            exit 1
+            ;;
+        esac
+        REVIEWS=$(bash "$VCR_ACTION_PATH/scripts/budget-guard.sh" "$VCR_REPO" "$VCR_PR")
+        council="$REVIEWS"
+        over=""
+        if [ "$max_council" -gt 0 ] && [ "$council" -ge "$max_council" ]; then
+          over="this review has already run $council times on the pull request, and the ceiling is $max_council"
+        fi
+        {
+          echo "over=$( [ -n "$over" ] && echo true || echo false )"
+          echo "council_runs=$council"
+          echo "reason=$over"
+        } >> "$GITHUB_OUTPUT"
+        echo "council runs: $council/$max_council"
+        if [ -n "$over" ]; then echo "Over budget: $over"; fi
 
     # The council is network-bound and the setup below is not, so start the
     # fan-out here and collect it just before the chair. Everything between the
@@ -563,7 +541,6 @@ runs:
           echo "VCR_OUT_EOF"
         } >> "$GITHUB_OUTPUT"
 
-
     # Probe the chair tokens before paying for an attempt.
     #
     # A chair attempt costs ~12s of claude-code-action setup (Bun, dependencies,
@@ -839,7 +816,6 @@ runs:
         VCR_PR: ${{ github.event.pull_request.number }}
         VCR_REASON: ${{ steps.budget.outputs.reason }}
         VCR_COUNCIL_RUNS: ${{ steps.budget.outputs.council_runs }}
-        VCR_BRANCH_RUNS: ${{ steps.budget.outputs.branch_runs }}
       run: |
         set -euo pipefail
         MARKER="<!-- vibecodereview:budget -->"
@@ -853,7 +829,6 @@ runs:
           echo "The review stopped without running, because $VCR_REASON."
           echo
           echo "- Council runs on this PR: $VCR_COUNCIL_RUNS"
-          echo "- Workflow runs on this branch: $VCR_BRANCH_RUNS"
           echo
           echo "Nothing here says the code is wrong. It says the automation is not"
           echo "converging, and another cycle costs what the last one cost. Decide:"

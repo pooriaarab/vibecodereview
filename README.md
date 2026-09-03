@@ -213,14 +213,13 @@ request can still be reviewed again and again while its author pushes, and the
 arithmetic above repeats every time. A pull request on its sixth review is not
 converging, and a seventh costs what the first cost.
 
-Two ceilings stop it. Both default on:
+One ceiling stops it, on by default:
 
 | Input | Default | Counts |
 |---|---|---|
-| `max_council_runs` | `6` | completed runs of this workflow on the pull request |
-| `max_branch_runs` | `60` | runs of every workflow in the repo on the branch |
+| `max_council_runs` | `3` | reviews from `claude[bot]` on the pull request |
 
-Set either to `0` to disable it.
+Set it to `0` to disable.
 
 Over the ceiling, the action skips the council and the chair, labels the pull
 request `needs-human`, and leaves one comment saying which ceiling it hit and
