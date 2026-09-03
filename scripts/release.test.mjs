@@ -96,11 +96,32 @@ try {
   assert.equal(refSha(clone, "v1"), initialSha, "major tag moved");
   assert.equal(packageVersion(clone, "v1.3.3"), "0.1.1");
 
+  // Criterion 6: resuming when a prior --apply created the local tag but failed
+  // to push it (e.g. a network blip) must still publish the tag, not drop it.
+  git(clone, ["tag", "v1.4.0"]); // local only: simulates a tag push that previously failed
+  const resumed = runRelease(clone, ["1.4.0", "--apply"]);
+  assert.equal(resumed.status, 0, resumed.stderr);
+  assert.equal(git(bare, ["tag", "-l", "v1.4.0"]), "v1.4.0", "immutable tag was never pushed to the remote");
+  assert.equal(git(bare, ["tag", "-l", "v1"]), "v1");
+  assert.equal(refSha(clone, "v1.4.0"), initialSha, "v1.4.0 did not point at main");
+  assert.equal(refSha(clone, "v1"), initialSha, "v1 did not point at main");
+  assert.equal(packageVersion(clone, "v1.4.0"), "0.1.1");
+
   // Older versions are still refused by the ordering guard.
   const older = runRelease(clone, ["1.3.2", "--apply"]);
   assert.notEqual(older.status, 0, older.stderr);
   assert.ok(older.stderr.includes("not newer"), older.stderr);
   assert.equal(git(clone, ["tag", "-l", "v1.3.2"]), "");
+
+  // Criterion 4: the publish workflow writes the version from the tag before
+  // npm publish, so the published artifact matches the git tag even though the
+  // committed package.json does not change.
+  assert.ok(existsSync(workflowPath), "npm-publish.yml missing");
+  const workflow = readFileSync(workflowPath, "utf8");
+  assert.ok(workflow.includes("Set package version from tag"), workflow);
+  assert.ok(/github\.ref_name|GITHUB_REF_NAME/.test(workflow), workflow);
+  assert.ok(workflow.includes("package.json"), workflow);
+  assert.match(workflow, /npm publish/);
 
   // Criterion 2: running from a different branch with a dirty working tree
   // refuses before any branch movement and leaves HEAD where it was.
@@ -113,16 +134,6 @@ try {
   assert.ok(git(clone, ["status", "--short"]).includes("?? dirty.txt"), "working tree was cleaned");
   assert.equal(git(clone, ["tag", "-l", "v1.3.4"]), "", "tag was created from a dirty checkout");
   assert.equal(Number(git(clone, ["rev-list", "--count", "HEAD"])), commitCountBefore, "dirty run created a commit");
-
-  // Criterion 4: the publish workflow writes the version from the tag before
-  // npm publish, so the published artifact matches the git tag even though the
-  // committed package.json does not change.
-  assert.ok(existsSync(workflowPath), "npm-publish.yml missing");
-  const workflow = readFileSync(workflowPath, "utf8");
-  assert.ok(workflow.includes("Set package version from tag"), workflow);
-  assert.ok(/github\.ref_name|GITHUB_REF_NAME/.test(workflow), workflow);
-  assert.ok(workflow.includes("package.json"), workflow);
-  assert.match(workflow, /npm publish/);
 
   console.log("release tests passed");
 } finally {

@@ -49,7 +49,9 @@ if (git(["status", "--short"])) {
 
 // Resolve everything against the remote tracking ref. The transport moved from
 // `gh api` to local `git` so this works offline and from a throwaway clone.
-git(["fetch", REMOTE, "--tags"]);
+// --force refreshes a local vX tag that a prior run already force-moved on the
+// remote; without it, `git fetch --tags` would exit with "would clobber".
+git(["fetch", REMOTE, "--tags", "--force"]);
 
 const mainSha = git(["rev-parse", `${REMOTE}/${BRANCH}`]);
 
