@@ -84,6 +84,23 @@ if (bodyRun.status !== 0) {
   }
 }
 
+const runnerTemp = path.join(tmp, "runner-temp");
+const runnerFallback = run(["review.council", "--mode", "full", "--members", "1"], {
+  RUNNER_TEMP: runnerTemp,
+  VIBETRACE_FILE: "",
+  VIBETRACE_INGEST_URL: "",
+});
+const runnerFallbackFile = path.join(runnerTemp, "vibetrace-traces.jsonl");
+if (runnerFallback.status !== 0) {
+  console.error("FAIL RUNNER_TEMP fallback exit", runnerFallback.status, runnerFallback.stderr);
+  failed++;
+} else if (!fs.existsSync(runnerFallbackFile) || !fs.readFileSync(runnerFallbackFile, "utf8").trim()) {
+  console.error("FAIL RUNNER_TEMP fallback did not append JSONL", runnerFallback.stdout, runnerFallback.stderr);
+  failed++;
+} else {
+  console.log("ok - appends JSONL under RUNNER_TEMP when no ingest URL is set");
+}
+
 const bad = run(["review.council", "--mode", "nope", "--members", "1"], { VIBETRACE_FILE: file });
 if (bad.status !== 0) {
   console.error("FAIL bad mode should exit 0", bad.status);
@@ -122,7 +139,8 @@ await new Promise((resolve, reject) => {
     req.on("data", (chunk) => (body += chunk));
     req.on("end", () => {
       received.push(body);
-      res.writeHead(200, { "content-type": "application/json" });
+      const status = req.url?.startsWith("/unauthorized") ? 401 : 200;
+      res.writeHead(status, { "content-type": "application/json" });
       res.end("{}");
     });
   });
@@ -161,7 +179,6 @@ await new Promise((resolve, reject) => {
           VIBETRACE_INGEST_TOKEN: "secret-token-123",
         },
       ).then((ingestRun2) => {
-        server.close();
         if (ingestRun2.status !== 0) {
           console.error("FAIL ingest with token exit", ingestRun2.status, ingestRun2.stderr);
           failed++;
@@ -183,7 +200,35 @@ await new Promise((resolve, reject) => {
             console.log("ok - posts review.council with Authorization Bearer token header");
           }
         }
-        resolve();
+
+        runAsync(
+          ["review.council", "--mode", "full", "--cache-hit", "0", "--members", "2", "--cancelled", "0"],
+          {
+            VIBETRACE_INGEST_URL: `http://127.0.0.1:${port}/unauthorized?credential=do-not-log`,
+            VIBETRACE_INGEST_TOKEN: "secret-token-123",
+          },
+        ).then((unauthorizedRun) => {
+          server.close();
+          const output = unauthorizedRun.stdout + unauthorizedRun.stderr;
+          if (unauthorizedRun.status !== 0) {
+            console.error("FAIL 401 must not fail emit", unauthorizedRun.status, output);
+            failed++;
+          } else if (!/^vibetrace-emit: ingest HTTP 401\n$/m.test(unauthorizedRun.stderr)) {
+            console.error("FAIL 401 log line", unauthorizedRun.stderr);
+            failed++;
+          } else if (output.includes("secret-token-123") || output.includes("credential=do-not-log")) {
+            console.error("FAIL 401 output leaked credential or URL query", output);
+            failed++;
+          } else if (/wrote review\.council/.test(output)) {
+            console.error("FAIL 401 was reported as a successful write", output);
+            failed++;
+          } else {
+            console.log(
+              `ok - contains 401 visibly without failing or leaking credentials: ${unauthorizedRun.stderr.trim()}`,
+            );
+          }
+          resolve();
+        });
       });
     });
   });

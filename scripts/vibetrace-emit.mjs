@@ -103,7 +103,11 @@ async function emit(record) {
       body,
       signal: AbortSignal.timeout(5000),
     });
-    if (!res.ok) throw new Error(`ingest HTTP ${res.status}`);
+    if (!res.ok) {
+      // Keep the auth failure visible without exposing the token or endpoint.
+      console.error(`vibetrace-emit: ingest HTTP ${res.status}`);
+      return null;
+    }
     return "ingest";
   }
   const file =
@@ -127,11 +131,13 @@ async function main() {
       process.exit(0);
     }
     const where = await emit(built.record);
-    console.log(`vibetrace-emit: wrote review.council -> ${where}`);
-  } catch (err) {
-    console.error(
-      `vibetrace-emit: silent-fail: ${err instanceof Error ? err.message : err}`,
-    );
+    if (where) {
+      console.log(`vibetrace-emit: wrote review.council -> ${where}`);
+    }
+  } catch {
+    // Never print an exception from fetch: implementations may include the
+    // configured URL or other request details in its message.
+    console.error("vibetrace-emit: silent-fail");
   }
 }
 
