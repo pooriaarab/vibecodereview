@@ -101,6 +101,24 @@ if (runnerFallback.status !== 0) {
   console.log("ok - appends JSONL under RUNNER_TEMP when no ingest URL is set");
 }
 
+const refused = run(
+  ["review.council", "--mode", "full", "--members", "1"],
+  { VIBETRACE_INGEST_URL: "http://127.0.0.1:1/ingest?credential=do-not-log" },
+);
+const refusedOutput = refused.stdout + refused.stderr;
+if (refused.status !== 0) {
+  console.error("FAIL connection-refused must not fail emit", refused.status, refusedOutput);
+  failed++;
+} else if (refused.stderr.trim() !== "vibetrace-emit: ingest request failed") {
+  console.error("FAIL connection-refused message", refused.stderr);
+  failed++;
+} else if (refusedOutput.includes("127.0.0.1:1") || refusedOutput.includes("do-not-log")) {
+  console.error("FAIL connection-refused output leaked endpoint details", refusedOutput);
+  failed++;
+} else {
+  console.log("ok - sanitizes a fetch exception (connection refused) without leaking the endpoint");
+}
+
 const bad = run(["review.council", "--mode", "nope", "--members", "1"], { VIBETRACE_FILE: file });
 if (bad.status !== 0) {
   console.error("FAIL bad mode should exit 0", bad.status);

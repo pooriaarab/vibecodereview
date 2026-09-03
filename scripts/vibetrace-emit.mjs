@@ -97,12 +97,20 @@ async function emit(record) {
     if (token) {
       headers["authorization"] = `Bearer ${token}`;
     }
-    const res = await fetch(ingest, {
-      method: "POST",
-      headers,
-      body,
-      signal: AbortSignal.timeout(5000),
-    });
+    let res;
+    try {
+      res = await fetch(ingest, {
+        method: "POST",
+        headers,
+        body,
+        signal: AbortSignal.timeout(5000),
+      });
+    } catch {
+      // Never print a fetch exception: implementations may include the
+      // configured URL or other request details in its message.
+      console.error("vibetrace-emit: ingest request failed");
+      return null;
+    }
     if (!res.ok) {
       // Keep the auth failure visible without exposing the token or endpoint.
       console.error(`vibetrace-emit: ingest HTTP ${res.status}`);
@@ -134,10 +142,13 @@ async function main() {
     if (where) {
       console.log(`vibetrace-emit: wrote review.council -> ${where}`);
     }
-  } catch {
-    // Never print an exception from fetch: implementations may include the
-    // configured URL or other request details in its message.
-    console.error("vibetrace-emit: silent-fail");
+  } catch (err) {
+    // Fetch failures are sanitized inside emit(), so anything reaching here
+    // (e.g. a filesystem error writing the JSONL fallback) carries no
+    // request details and is safe to print in full.
+    console.error(
+      `vibetrace-emit: silent-fail: ${err instanceof Error ? err.message : err}`,
+    );
   }
 }
 
