@@ -1,9 +1,11 @@
 name: npm publish
 on:
+  # The vX major tag is pushed as +refs/tags/vX, which deliberately does not match v*.*.*, so a major-pointer move is not a publish event.
   release:
     types: [published]
-  push:
-    tags: ["v*.*.*"]
+concurrency:
+  group: npm-publish-${{ github.ref_name }}
+  cancel-in-progress: false
 jobs:
   publish:
     runs-on: ubuntu-latest
@@ -16,6 +18,12 @@ jobs:
         with:
           node-version: "20"
           registry-url: "https://registry.npmjs.org"
+      - name: Set package version from tag
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          VERSION="${TAG#v}"
+          node -e "const fs=require('fs'); const f='package.json'; const p=JSON.parse(fs.readFileSync(f,'utf8')); p.version='${VERSION}'; fs.writeFileSync(f, JSON.stringify(p, null, 2) + '\n');"
       - name: Selfcheck
         run: npm run selfcheck
       - name: Publish
