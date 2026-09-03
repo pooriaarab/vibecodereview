@@ -1,9 +1,11 @@
 name: npm publish
 on:
+  # The vX major tag is pushed as +refs/tags/vX, which deliberately does not match v*.*.*, so a major-pointer move is not a publish event.
   release:
     types: [published]
-  push:
-    tags: ["v*.*.*"]
+concurrency:
+  group: npm-publish-${{ github.ref_name }}
+  cancel-in-progress: false
 jobs:
   publish:
     runs-on: ubuntu-latest

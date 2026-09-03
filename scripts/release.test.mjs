@@ -31,6 +31,19 @@ function refSha(cwd, ref) {
   return git(cwd, ["rev-parse", ref]);
 }
 
+function topBlock(src, header) {
+  const lines = src.split("\n");
+  const start = lines.indexOf(header);
+  assert.notEqual(start, -1, `missing ${header}`);
+  const out = [];
+  for (let i = start + 1; i < lines.length; i++) {
+    const line = lines[i];
+    if (line !== "" && !line.startsWith(" ") && !line.startsWith("#")) break;
+    out.push(line);
+  }
+  return out.join("\n").trim();
+}
+
 const tmp = mkdtempSync(join(tmpdir(), "release-test-"));
 const bare = join(tmp, "origin.git");
 const clone = join(tmp, "clone");
@@ -122,6 +135,14 @@ try {
   assert.ok(/github\.ref_name|GITHUB_REF_NAME/.test(workflow), workflow);
   assert.ok(workflow.includes("package.json"), workflow);
   assert.match(workflow, /npm publish/);
+
+  // Criterion 7: the publish workflow must have exactly one trigger, and it
+  // must be release: published. Two triggers (tag push + release) would publish
+  // the same version twice and guarantee a registry E403 on every release.
+  const onBlock = topBlock(workflow, "on:");
+  const triggers = [...onBlock.matchAll(/^  ([a-z]+):/gm)].map((m) => m[1]);
+  assert.deepEqual(triggers, ["release"], "npm-publish.yml must have exactly one publish trigger");
+  assert.match(onBlock, /^  release:\n    types: \[published\]/m);
 
   // Criterion 2: running from a different branch with a dirty working tree
   // refuses before any branch movement and leaves HEAD where it was.
