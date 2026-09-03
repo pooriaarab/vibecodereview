@@ -240,6 +240,9 @@ await new Promise((resolve, reject) => {
           } else if (/wrote review\.council/.test(output)) {
             console.error("FAIL 401 was reported as a successful write", output);
             failed++;
+          } else if (reqHeaders[2]?.authorization !== "Bearer secret-token-123") {
+            console.error("FAIL 401 request did not carry the expected authorization header", reqHeaders[2]);
+            failed++;
           } else {
             console.log(
               `ok - contains 401 visibly without failing or leaking credentials: ${unauthorizedRun.stderr.trim()}`,
