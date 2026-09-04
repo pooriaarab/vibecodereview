@@ -903,14 +903,26 @@ runs:
         # Login is checked too: without it, any human or unrelated bot review
         # (e.g. coderabbitai[bot], which reviews this very PR) posted after
         # STARTED_AT satisfies the gate even when every chair failed to post.
-        # "claude[bot]" covers the four Claude Code Action chairs; the
-        # OpenRouter fallback posts through `gh pr review` with
-        # `inputs.github_token`, documented above as the caller's
-        # `github.token`, which GitHub always attributes to
-        # "github-actions[bot]".
+        # "claude[bot]" covers the four Claude Code Action chairs (confirmed
+        # by scripts/budget-guard.sh, which already counts reviews under that
+        # login for the same fleet). The OpenRouter fallback posts through
+        # `gh pr review` with `inputs.github_token`; on the default wiring
+        # (`github_token: ${{ github.token }}`) GitHub attributes that to
+        # "github-actions[bot]", but a consumer repo may instead pass a
+        # `vibecodereview[bot]`-backed app token, the same login
+        # council-cache.mjs and the review-state lookup above already treat
+        # as an automation actor -- so it is accepted here too.
         posted=$(gh api "repos/$VCR_REPO/pulls/$VCR_PR/reviews" --paginate 2>/dev/null \
-          | jq -s "[.[][] | select(.submitted_at >= \"$STARTED_AT\" and (.user.login == \"claude[bot]\" or .user.login == \"github-actions[bot]\"))] | length" 2>/dev/null)
+          | jq -s "[.[][] | select(.submitted_at >= \"$STARTED_AT\" and (.user.login == \"claude[bot]\" or .user.login == \"github-actions[bot]\" or .user.login == \"vibecodereview[bot]\"))] | length" 2>/dev/null)
         posted="${posted:-0}"
+
+        # The primary subscription failing is easy to miss: the gate can
+        # still go green off a later token, and the only trace was a probe
+        # line nobody reads unless the gate also fails. Warn every run, not
+        # only on failure.
+        if [ "$TOKEN_1" = "dead" ] && { [ "$TOKEN_2" = "live" ] || [ "$TOKEN_3" = "live" ] || [ "$TOKEN_4" = "live" ]; }; then
+          echo "::warning::primary Claude subscription token is dead (probe: token_1=$TOKEN_1 token_2=$TOKEN_2 token_3=$TOKEN_3 token_4=$TOKEN_4); this run is on a backup token"
+        fi
 
         if [ "$posted" -gt 0 ]; then
           echo "chair: $claimed posted $posted review(s) this run"

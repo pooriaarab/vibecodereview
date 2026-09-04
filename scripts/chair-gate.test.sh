@@ -61,8 +61,34 @@ check() {
   fi
 }
 
+# Asserts on the gate's output rather than its exit code, for behavior (like
+# the dead-primary-token warning) that must not flip the pass/fail verdict.
+check_output() {
+  local mode="$1" needle="$2" name="$3" out
+  out=$(bash "$WORK/gate.sh" 2>&1)
+  case "$mode" in
+    contains)
+      if printf '%s' "$out" | grep -qF "$needle"; then
+        printf 'ok    %s\n' "$name"
+      else
+        printf 'FAIL  %s (output did not contain %q)\n' "$name" "$needle"
+        fails=$((fails + 1))
+      fi
+      ;;
+    lacks)
+      if printf '%s' "$out" | grep -qF "$needle"; then
+        printf 'FAIL  %s (output unexpectedly contained %q)\n' "$name" "$needle"
+        fails=$((fails + 1))
+      else
+        printf 'ok    %s\n' "$name"
+      fi
+      ;;
+  esac
+}
+
 claude_review() { printf '{"submitted_at":"%s","user":{"login":"claude[bot]"}}' "${1:-2026-01-01T13:00:00Z}"; }
 fallback_review() { printf '{"submitted_at":"%s","user":{"login":"github-actions[bot]"}}' "${1:-2026-01-01T13:00:00Z}"; }
+vibecodereview_review() { printf '{"submitted_at":"%s","user":{"login":"vibecodereview[bot]"}}' "${1:-2026-01-01T13:00:00Z}"; }
 unrelated_review() { printf '{"submitted_at":"%s","user":{"login":"coderabbitai[bot]"}}' "${1:-2026-01-01T13:00:00Z}"; }
 
 # The shipped bug. A step succeeded, nothing was posted, the check went green.
@@ -81,6 +107,12 @@ OVER_BUDGET=false P=failure B=failure T=failure Q=success F=skipped REVIEWS_JSON
   check 0 'the fourth token posting passes'
 OVER_BUDGET=false P=failure B=failure T=failure Q=failure F=success REVIEWS_JSON="[$(fallback_review)]" \
   check 0 'the OpenRouter fallback posting under github-actions[bot] passes'
+
+# A consumer repo may wire a `vibecodereview[bot]`-backed app token into
+# github_token instead of the default github.token, so the fallback's review
+# shows up under that login there rather than github-actions[bot].
+OVER_BUDGET=false P=failure B=failure T=failure Q=failure F=success REVIEWS_JSON="[$(vibecodereview_review)]" \
+  check 0 'the OpenRouter fallback posting under vibecodereview[bot] passes'
 
 OVER_BUDGET=false P=failure B=failure T=failure Q=failure F=failure REVIEWS_JSON='[]' \
   check 1 'every chair failing fails the gate'
@@ -109,6 +141,19 @@ OVER_BUDGET=false P=failure B=failure T=failure Q=failure F=success \
 # without a review. Failing here would hide a real failure behind a cost stop.
 OVER_BUDGET=true P=skipped B=skipped T=skipped Q=skipped F=skipped REVIEWS_JSON='[]' \
   check 0 'an over-budget run passes without a review'
+
+# The primary subscription failing over to a backup token is easy to miss --
+# the gate still goes green -- so it must warn on both the success and
+# failure path, not only inside the failure message.
+OVER_BUDGET=false P=failure B=success T=skipped Q=skipped F=skipped TOKEN_1=dead TOKEN_2=live \
+  REVIEWS_JSON="[$(claude_review)]" \
+  check_output contains '::warning::' 'a dead primary token warns even when the gate passes'
+OVER_BUDGET=false P=failure B=failure T=failure Q=failure F=failure TOKEN_1=dead TOKEN_2=live \
+  REVIEWS_JSON='[]' \
+  check_output contains '::warning::' 'a dead primary token warns when the gate also fails'
+OVER_BUDGET=false P=success B=skipped T=skipped Q=skipped F=skipped TOKEN_1=live TOKEN_2=live \
+  REVIEWS_JSON="[$(claude_review)]" \
+  check_output lacks '::warning::' 'a live primary token warns of nothing'
 
 [ "$fails" = 0 ] || { printf '\n%s failing\n' "$fails" >&2; exit 1; }
 printf '\nall passing\n'
