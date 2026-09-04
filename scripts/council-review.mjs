@@ -220,14 +220,21 @@ async function main() {
     return;
   }
 
-  // Read the carry BEFORE the trivial gate, and hand it back untouched when the
-  // gate fires. The workflow reads `VCR_CARRY_FILE` with an
-  // `existsSync(...) ? ... : ""` fallback, so returning without writing it
-  // rewrites the review-state comment with an EMPTY carry — one docs-only push
-  // after a review with unresolved findings would erase them permanently. That
-  // is the invariant the carry write at the end of this file already states:
-  // dropping an older entry hides an unresolved finding merely because the next
-  // delta did not repeat it.
+  // Read the carry BEFORE the trivial gate, so the skip report can carry it.
+  //
+  // What this fixes: the report handed to the chair on a trivial cycle used to
+  // omit the "Findings carried forward" section entirely, so the chair was not
+  // told to re-check a finding an earlier cycle left open. That is the
+  // invariant the carry write at the end of this file states: dropping an entry
+  // hides an unresolved finding merely because the next delta did not repeat it.
+  //
+  // What it does NOT fix, despite an earlier version of this comment: the
+  // review-state comment is not wiped when this path returns. `action.yml`'s
+  // "Record review state" step restores the previous cycle's carry from
+  // `vcr-prior-carry.b64` when `council-carry.next.md` is absent. Writing
+  // VCR_CARRY_FILE below is therefore belt, not the load-bearing part — it
+  // keeps this file's own contract ("every return leaves a carry") true without
+  // depending on a fallback in another file to hold it up.
   const priorFindings = process.env.VCR_PRIOR_FINDINGS_FILE && fs.existsSync(process.env.VCR_PRIOR_FINDINGS_FILE)
     ? fs.readFileSync(process.env.VCR_PRIOR_FINDINGS_FILE, "utf8")
     : "";

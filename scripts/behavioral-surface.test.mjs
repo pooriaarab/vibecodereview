@@ -44,12 +44,17 @@ assert.equal(behavioralSurface(diffFor("tools/CHANGELOGGER.ts")).trivial, false)
 assert.equal(behavioralSurface(diffFor("config.json")).trivial, false);
 assert.equal(behavioralSurface(diffFor("package-lock.json")).trivial, true);
 
-// A trivial delta must hand the carry back untouched. The workflow reads
-// VCR_CARRY_FILE with an `existsSync(...) ? ... : ""` fallback, so an early
-// return that never writes it rewrites the review-state comment with an EMPTY
-// carry -- one docs-only push after a review with unresolved findings would
-// erase them permanently. Drive the real engine, not a stub: the bug lives in
-// the order of the reads, which a stub would not reproduce.
+// A trivial delta must still hand the carry forward. The load-bearing half is
+// the REPORT: without this, the trivial-cycle report omitted the "Findings
+// carried forward" section, so the chair was never told to re-check a finding
+// an earlier cycle left open. The carry-file write asserted below is belt --
+// action.yml restores the previous carry from vcr-prior-carry.b64 when the file
+// is absent, so the review-state comment is not wiped either way. Asserting it
+// anyway keeps this engine's own contract ("every return leaves a carry") from
+// depending on a fallback in another file.
+//
+// Drive the real engine, not a stub: the defect lives in the ORDER of the reads,
+// which a stub would not reproduce.
 {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vcr-trivial-"));
   try {
@@ -69,7 +74,7 @@ assert.equal(behavioralSurface(diffFor("package-lock.json")).trivial, true);
     assert.equal(
       fs.existsSync(path.join(dir, "carry.next.md")),
       true,
-      "trivial delta must write the carry file, or the state comment is rewritten empty",
+      "every return from the engine must leave a carry behind",
     );
     assert.match(fs.readFileSync(path.join(dir, "carry.next.md"), "utf8"), /unresolved finding/);
     // The chair must still be told to re-check them.
