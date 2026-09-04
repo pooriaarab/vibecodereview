@@ -220,10 +220,25 @@ async function main() {
     return;
   }
 
+  // Read before the trivial-delta gate below: every skip path from here on
+  // must still surface carried-forward findings, or a delta that goes trivial
+  // right after a cycle that left a real finding open silently drops it from
+  // the report instead of carrying it to the next cycle.
+  const priorFindings = process.env.VCR_PRIOR_FINDINGS_FILE && fs.existsSync(process.env.VCR_PRIOR_FINDINGS_FILE)
+    ? fs.readFileSync(process.env.VCR_PRIOR_FINDINGS_FILE, "utf8")
+    : "";
+  const baseReportOptions = {
+    reviewHeadSha: process.env.VCR_REVIEW_HEAD_SHA,
+    memberDiffNote: process.env.VCR_MEMBER_DIFF_NOTE,
+    carriedFindings: priorFindings,
+    diffTruncated,
+    contextTruncated,
+  };
+
   const surface = behavioralSurface(memberDiffRaw);
   if (surface.trivial) {
     const listed = surface.paths.map((p) => `\`${p}\``).join(", ");
-    write(`# 🧑‍⚖️ LLM Council findings\n\n_Council skipped: trivial delta with no behavioral surface — ${surface.reason}. Paths: ${listed}._\n`);
+    write(buildFindingsMarkdown([], baseReportOptions) + `\n\n_Council skipped: trivial delta with no behavioral surface — ${surface.reason}. Paths: ${listed}._\n`);
     console.log(`Trivial delta — council skipped (${surface.paths.length} inert path(s)).`);
     return;
   }
@@ -248,18 +263,7 @@ async function main() {
     mutationSkipped = "the member delta was truncated before its added test lines";
   }
   if (mutationSkipped) console.log(`Mutation lens enabled but not dispatched: ${mutationSkipped}`);
-  const priorFindings = process.env.VCR_PRIOR_FINDINGS_FILE && fs.existsSync(process.env.VCR_PRIOR_FINDINGS_FILE)
-    ? fs.readFileSync(process.env.VCR_PRIOR_FINDINGS_FILE, "utf8")
-    : "";
-  const reportOptions = {
-    reviewHeadSha: process.env.VCR_REVIEW_HEAD_SHA,
-    memberDiffNote: process.env.VCR_MEMBER_DIFF_NOTE,
-    skippedLenses,
-    carriedFindings: priorFindings,
-    diffTruncated,
-    contextTruncated,
-    mutationSkipped,
-  };
+  const reportOptions = { ...baseReportOptions, skippedLenses, mutationSkipped };
 
   if (members.length === 0) {
     write(buildFindingsMarkdown([], reportOptions) + "\n\n_Council skipped: no configured lens applies to the member delta._\n");
