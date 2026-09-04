@@ -220,10 +220,34 @@ async function main() {
     return;
   }
 
+  // Read the carry BEFORE the trivial gate, and hand it back untouched when the
+  // gate fires. The workflow reads `VCR_CARRY_FILE` with an
+  // `existsSync(...) ? ... : ""` fallback, so returning without writing it
+  // rewrites the review-state comment with an EMPTY carry — one docs-only push
+  // after a review with unresolved findings would erase them permanently. That
+  // is the invariant the carry write at the end of this file already states:
+  // dropping an older entry hides an unresolved finding merely because the next
+  // delta did not repeat it.
+  const priorFindings = process.env.VCR_PRIOR_FINDINGS_FILE && fs.existsSync(process.env.VCR_PRIOR_FINDINGS_FILE)
+    ? fs.readFileSync(process.env.VCR_PRIOR_FINDINGS_FILE, "utf8")
+    : "";
+  // The metadata that does not depend on which members ran, so the trivial-delta
+  // report carries the same header the full report would.
+  const baseReportOptions = {
+    reviewHeadSha: process.env.VCR_REVIEW_HEAD_SHA,
+    memberDiffNote: process.env.VCR_MEMBER_DIFF_NOTE,
+    diffTruncated,
+    contextTruncated,
+  };
+
   const surface = behavioralSurface(memberDiffRaw);
   if (surface.trivial) {
     const listed = surface.paths.map((p) => `\`${p}\``).join(", ");
-    write(`# 🧑‍⚖️ LLM Council findings\n\n_Council skipped: trivial delta with no behavioral surface — ${surface.reason}. Paths: ${listed}._\n`);
+    write(
+      buildFindingsMarkdown([], { ...baseReportOptions, carriedFindings: priorFindings })
+      + `\n\n_Council skipped: trivial delta with no behavioral surface — ${surface.reason}. Paths: ${listed}._\n`,
+    );
+    if (process.env.VCR_CARRY_FILE) fs.writeFileSync(process.env.VCR_CARRY_FILE, priorFindings);
     console.log(`Trivial delta — council skipped (${surface.paths.length} inert path(s)).`);
     return;
   }
@@ -248,16 +272,10 @@ async function main() {
     mutationSkipped = "the member delta was truncated before its added test lines";
   }
   if (mutationSkipped) console.log(`Mutation lens enabled but not dispatched: ${mutationSkipped}`);
-  const priorFindings = process.env.VCR_PRIOR_FINDINGS_FILE && fs.existsSync(process.env.VCR_PRIOR_FINDINGS_FILE)
-    ? fs.readFileSync(process.env.VCR_PRIOR_FINDINGS_FILE, "utf8")
-    : "";
   const reportOptions = {
-    reviewHeadSha: process.env.VCR_REVIEW_HEAD_SHA,
-    memberDiffNote: process.env.VCR_MEMBER_DIFF_NOTE,
+    ...baseReportOptions,
     skippedLenses,
     carriedFindings: priorFindings,
-    diffTruncated,
-    contextTruncated,
     mutationSkipped,
   };
 

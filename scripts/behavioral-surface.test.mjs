@@ -1,5 +1,9 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { execFileSync } from "node:child_process";
 import { behavioralSurface } from "./behavioral-surface.mjs";
 
 function diffFor(path) {
@@ -39,5 +43,44 @@ assert.equal(behavioralSurface(diffFor("tools/CHANGELOGGER.ts")).trivial, false)
 // Config is behavioral; named lockfiles are inert.
 assert.equal(behavioralSurface(diffFor("config.json")).trivial, false);
 assert.equal(behavioralSurface(diffFor("package-lock.json")).trivial, true);
+
+// A trivial delta must hand the carry back untouched. The workflow reads
+// VCR_CARRY_FILE with an `existsSync(...) ? ... : ""` fallback, so an early
+// return that never writes it rewrites the review-state comment with an EMPTY
+// carry -- one docs-only push after a review with unresolved findings would
+// erase them permanently. Drive the real engine, not a stub: the bug lives in
+// the order of the reads, which a stub would not reproduce.
+{
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vcr-trivial-"));
+  try {
+    const prior = "## Old member — security lens\n\n- `src/auth.ts:42` — unresolved finding.\n";
+    fs.writeFileSync(path.join(dir, "pr.diff"), diffFor("docs/x.md"));
+    fs.writeFileSync(path.join(dir, "prior.md"), prior);
+    const engine = path.join(import.meta.dirname, "council-review.mjs");
+    const out = path.join(dir, "out.md");
+    execFileSync(process.execPath, [engine, path.join(dir, "pr.diff"), out], {
+      env: {
+        ...process.env,
+        VCR_PRIOR_FINDINGS_FILE: path.join(dir, "prior.md"),
+        VCR_CARRY_FILE: path.join(dir, "carry.next.md"),
+      },
+      stdio: "ignore",
+    });
+    assert.equal(
+      fs.existsSync(path.join(dir, "carry.next.md")),
+      true,
+      "trivial delta must write the carry file, or the state comment is rewritten empty",
+    );
+    assert.match(fs.readFileSync(path.join(dir, "carry.next.md"), "utf8"), /unresolved finding/);
+    // The chair must still be told to re-check them.
+    const report = fs.readFileSync(out, "utf8");
+    assert.match(report, /Findings carried forward/);
+    assert.match(report, /unresolved finding/);
+    // ...and the skip itself stays disclosed.
+    assert.match(report, /Council skipped: trivial delta/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
 
 console.log("behavioral surface tests passed");
