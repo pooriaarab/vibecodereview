@@ -155,5 +155,12 @@ OVER_BUDGET=false P=success B=skipped T=skipped Q=skipped F=skipped TOKEN_1=live
   REVIEWS_JSON="[$(claude_review)]" \
   check_output lacks '::warning::' 'a live primary token warns of nothing'
 
+# The over-budget exit returns before any of the logic below it, so a dead
+# primary token on an over-budget run must still be warned about there, not
+# only on the reviewed path.
+OVER_BUDGET=true P=skipped B=skipped T=skipped Q=skipped F=skipped TOKEN_1=dead TOKEN_2=live \
+  REVIEWS_JSON='[]' \
+  check_output contains '::warning::' 'a dead primary token warns on an over-budget run'
+
 [ "$fails" = 0 ] || { printf '\n%s failing\n' "$fails" >&2; exit 1; }
 printf '\nall passing\n'
