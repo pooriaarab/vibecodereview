@@ -49,6 +49,7 @@ import {
   callModelWithFallback,
 } from "./council-members.mjs";
 import { cacheKey, loadCouncilResults, saveCouncilResult } from "./council-cache.mjs";
+import { behavioralSurface } from "./behavioral-surface.mjs";
 
 async function main() {
   if (process.argv.includes("--selfcheck")) {
@@ -216,6 +217,14 @@ async function main() {
   if (!diff) {
     write("# 🧑‍⚖️ LLM Council findings\n\n_Council skipped: empty diff._\n");
     console.log("Empty diff — council skipped.");
+    return;
+  }
+
+  const surface = behavioralSurface(memberDiffRaw);
+  if (surface.trivial) {
+    const listed = surface.paths.map((p) => `\`${p}\``).join(", ");
+    write(`# 🧑‍⚖️ LLM Council findings\n\n_Council skipped: trivial delta with no behavioral surface — ${surface.reason}. Paths: ${listed}._\n`);
+    console.log(`Trivial delta — council skipped (${surface.paths.length} inert path(s)).`);
     return;
   }
 
