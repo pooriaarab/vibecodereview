@@ -12,11 +12,13 @@ const root = path.join(scriptsDir, "..");
 const pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
 const testScript = pkg.scripts?.test ?? "";
 
-// The test script must discover test files via a glob, not a hand-list.
-assert.match(
-  testScript,
-  /\*\.test\.mjs/,
-  "npm test must discover scripts/*.test.mjs via a glob, not a hand-maintained list",
+// The test script must discover test files via the exact glob token, not a
+// hand-list or a narrower pattern (e.g. `scripts/test-*.test.mjs`) that would
+// still satisfy a loose `*.test.mjs` substring match while silently skipping
+// most files on disk.
+assert.ok(
+  testScript.split(/\s+/).includes("scripts/*.test.mjs"),
+  "npm test must discover scripts/*.test.mjs via a glob, not a hand-maintained list or a narrower pattern",
 );
 
 // No individual test file may be hardcoded: a hardcoded name means a new
@@ -33,7 +35,11 @@ for (const f of onDisk) {
   );
 }
 
-// `npm test` must still chain into the selfchecks.
-assert.match(testScript, /selfcheck/, "npm test must still run the selfcheck step");
+// `npm test` must still chain into the selfchecks by actually invoking the
+// script, not merely mentioning the word (e.g. `&& echo selfcheck`).
+assert.ok(
+  testScript.includes("npm run selfcheck"),
+  "npm test must still run `npm run selfcheck`",
+);
 
 console.log(`ok - npm test discovers all ${onDisk.length} test files via glob`);
