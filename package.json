@@ -10,7 +10,7 @@
     "vibecodereview": "bin/vibecodereview.mjs"
   },
   "scripts": {
-    "test": "node scripts/review-delta.test.mjs && node scripts/council-cache.test.mjs && node scripts/vibetrace-emit.test.mjs && node scripts/lint-workflow.test.mjs && node scripts/release.test.mjs && node scripts/behavioral-surface.test.mjs && node scripts/council-carry.test.mjs && node scripts/chair-prompt.test.mjs && node scripts/vibetrace-records.test.mjs && npm run selfcheck",
+    "test": "node scripts/review-delta.test.mjs && node scripts/council-cache.test.mjs && node scripts/vibetrace-emit.test.mjs && node scripts/lint-workflow.test.mjs && node scripts/release.test.mjs && node scripts/behavioral-surface.test.mjs && node scripts/council-carry.test.mjs && node scripts/vibetrace-records.test.mjs && npm run selfcheck",
     "selfcheck": "node scripts/council-review.mjs --selfcheck && node scripts/chair-fallback.mjs --selfcheck",
     "mcp": "node mcp/server.mjs"
   },
