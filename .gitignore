@@ -9,3 +9,8 @@ probe.*
 # Cursor cloud — local secrets stay local
 .env.local
 .env.*.local
+
+# Python bytecode from scripts/*.py. Not tracked, and an untracked file
+# still blocks bin/release.mjs, so leaving it out costs a release every time.
+__pycache__/
+*.pyc
