@@ -78,6 +78,16 @@ if (detectStrength("# x\n", "delta") !== "delta") {
   console.error("FAIL detectStrength delta");
   failed++;
 }
+
+// A run that threw (council-review.mjs's top-level catch) is not a quiet
+// full/delta success and must not be recorded as one.
+const erroredMd = "# 🧑‍⚖️ LLM Council findings\n\n_Council errored: boom_\n";
+if (detectStrength(erroredMd, "full") !== "errored" || detectStrength(erroredMd, "delta") !== "errored") {
+  console.error("FAIL detectStrength must classify an errored run as `errored`, not full/delta");
+  failed++;
+} else {
+  console.log("ok - strength=errored for a run that threw");
+}
 fs.rmSync(tmp, { recursive: true, force: true });
 
 // --- strength must never mistake a skipped review for a full one ----------
