@@ -50,6 +50,7 @@ import {
 } from "./council-members.mjs";
 import { cacheKey, loadCouncilResults, saveCouncilResult } from "./council-cache.mjs";
 import { behavioralSurface } from "./behavioral-surface.mjs";
+import { filterMembersByKindRouting, lensesForKinds, routeLenses } from "./lens-routing.mjs";
 
 async function main() {
   if (process.argv.includes("--selfcheck")) {
@@ -117,6 +118,15 @@ async function main() {
     // would fail the selfcheck that AGENTS.md requires it to run.
     if (!DEFAULT_MODELS.some((m) => m.lens === "scope")) throw new Error("selfcheck: scope lens missing from default members");
     selfcheckMutationRoster(buildFindingsMarkdown);
+
+    const allRoutedLenses = ["correctness", "performance", "security", "maintainability", "scope"];
+    const emptyRoute = routeLenses("");
+    if (!allRoutedLenses.every((l) => emptyRoute.lenses.includes(l))) {
+      throw new Error("selfcheck: empty diff must fail open with every routed lens");
+    }
+    if (!lensesForKinds(new Set(["docs"])).includes("scope")) {
+      throw new Error("selfcheck: routing must never drop scope");
+    }
 
     // A unique temp dir, not a fixed name in the working directory: the old
     // fixture would clobber a real test_ctx.tmp and broke concurrent runs.
@@ -249,7 +259,7 @@ async function main() {
   // on the diff read above.
   let { members, mutationSkipped } = withMutationMember(models, memberDiffRaw);
   const lensPathFilter = process.env.LENS_PATH_FILTER;
-  const skippedLenses = [...new Set(
+  let skippedLenses = [...new Set(
     members.filter((m) => !lensCanReviewDiff(m.lens, memberDiffRaw, lensPathFilter)).map((m) => m.lens),
   )];
   members = members.filter((m) => lensCanReviewDiff(m.lens, memberDiffRaw, lensPathFilter));
@@ -263,6 +273,10 @@ async function main() {
     mutationSkipped = "the member delta was truncated before its added test lines";
   }
   if (mutationSkipped) console.log(`Mutation lens enabled but not dispatched: ${mutationSkipped}`);
+  const kindRouting = filterMembersByKindRouting(members, memberDiffRaw);
+  members = kindRouting.members;
+  skippedLenses.push(...kindRouting.skippedLenses);
+  skippedLenses = [...new Set(skippedLenses)];
   const reportOptions = { ...baseReportOptions, skippedLenses, mutationSkipped };
 
   if (members.length === 0) {

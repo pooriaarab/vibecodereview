@@ -104,7 +104,7 @@ const TEST_PATH = /(^|\/)(tests?|spec|__tests__)\/|[._-](test|spec)\.[a-z]+$|(^|
 // `Latest.js`) match too. Requiring the capitalized suffix rules that out.
 const CONVENTIONAL_TEST_SUFFIX = /(Test|Tests|Spec|Specs)\.[A-Za-z0-9]+$/;
 
-function isTestPath(path) {
+export function isTestPath(path) {
   return TEST_PATH.test(path) || CONVENTIONAL_TEST_SUFFIX.test(path);
 }
 

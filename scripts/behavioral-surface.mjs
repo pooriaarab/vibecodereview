@@ -3,28 +3,28 @@
 
 import { diffPaths } from "./review-delta.mjs";
 
-const EDITOR_NOISE = new Set([
+export const EDITOR_NOISE = new Set([
   ".gitignore", ".gitattributes", ".editorconfig", ".prettierignore",
   ".npmignore", ".dockerignore", ".cursorignore",
 ]);
 
-const LOCKFILES = new Set([
+export const LOCKFILES = new Set([
   "package-lock.json", "npm-shrinkwrap.json", "yarn.lock", "pnpm-lock.yaml",
   "bun.lock", "bun.lockb", "Cargo.lock", "poetry.lock", "Gemfile.lock",
   "composer.lock", "go.sum", "Pipfile.lock", "uv.lock", "flake.lock",
 ]);
 
-const INERT_EXTENSIONS = new Set([
+export const INERT_EXTENSIONS = new Set([
   ".md", ".mdx", ".txt", ".rst",
   ".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".ico",
   ".mp4", ".mov", ".woff", ".woff2", ".ttf", ".otf",
 ]);
 
-const AGENT_INSTRUCTION_NAMES = new Set([
+export const AGENT_INSTRUCTION_NAMES = new Set([
   "AGENTS.md", "CLAUDE.md", "GEMINI.md", ".cursorrules", ".windsurfrules", "SKILL.md",
 ]);
 
-const BEHAVIORAL_DIRS = new Set([
+export const BEHAVIORAL_DIRS = new Set([
   ".claude", ".agents", ".cursor", ".github",
   "skills", "commands", "prompts", "rules", "hooks",
 ]);
@@ -39,13 +39,12 @@ function extensionOf(path) {
   return i === -1 ? "" : path.slice(i).toLowerCase();
 }
 
-function isAgentInstructionPath(path) {
+export function isAgentInstructionPath(path) {
   if (AGENT_INSTRUCTION_NAMES.has(basename(path))) return true;
   return path.split("/").some((seg) => BEHAVIORAL_DIRS.has(seg));
 }
 
-function isInertPath(path) {
-  if (isAgentInstructionPath(path)) return false;
+export function isProseMediaPath(path) {
   const base = basename(path);
   if (EDITOR_NOISE.has(base)) return true;
   if (base === "LICENSE" || base === "NOTICE") return true;
@@ -54,8 +53,13 @@ function isInertPath(path) {
   // never fail in. A real changelog with an extension is already covered by
   // INERT_EXTENSIONS below.
   if (base === "CHANGELOG") return true;
-  if (LOCKFILES.has(base)) return true;
   return INERT_EXTENSIONS.has(extensionOf(path));
+}
+
+function isInertPath(path) {
+  if (isAgentInstructionPath(path)) return false;
+  if (LOCKFILES.has(basename(path))) return true;
+  return isProseMediaPath(path);
 }
 
 /** @returns {{ trivial: boolean, paths: string[], reason: string }} */

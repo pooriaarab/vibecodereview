@@ -32,7 +32,32 @@ verdict, self-healing fix.
 | Sonnet (mutation) | openrouter.ai | `OPENROUTER_API_KEY` | can these tests fail at all — **off by default** |
 
 A member with no key drops out. No key at all → the council step is skipped, and
-Claude still reviews alone. Nothing here blocks the PR on a provider outage. The scope lens reads the PR's title, body, and linked issues from `PR_CONTEXT_FILE` when available to verify the diff matches the author's claim.
+Claude still reviews alone. Nothing here blocks the PR on a provider outage.
+
+### Lens routing
+
+Council members are dispatched by the **kind of file** a delta touches — never by diff
+size, line count, or file count. Each lens reviews only the kinds it can speak to:
+
+| Lens | File kinds |
+| --- | --- |
+| scope | always (every delta) |
+| correctness | source, test, CI, deps, agent instructions |
+| security | source, CI, deps, agent instructions |
+| maintainability | source, test, CI, agent instructions |
+| performance | source, style (CSS/SCSS/Less/Sass) |
+
+A lockfile-only or docs-only push never reaches routing at all: the trivial-delta check
+above already skips the whole council, scope included, before any lens is dispatched.
+Routing only decides the roster once a delta has at least one non-inert path — a
+dependency-manifest-only push (`package.json`, `go.mod`, ...) keeps scope, correctness,
+and security; a test-only push keeps scope, correctness, and maintainability; a
+style-only push keeps scope and performance. An unparseable diff fails open and
+dispatches every lens. Dropped lenses are listed in the findings as "Lenses not dispatched".
+
+Set `VCR_LENS_ROUTING=off` to disable routing and dispatch the full roster.
+
+The scope lens reads the PR's title, body, and linked issues from `PR_CONTEXT_FILE` when available to verify the diff matches the author's claim.
 
 A pull request also has to show its work: a visible change carries before and after
 screenshots, a command carries its result. The scope member judges that evidence against
