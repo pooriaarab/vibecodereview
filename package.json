@@ -1,9 +1,7 @@
 {
   "name": "vibecodereview",
   "version": "0.1.1",
-  "publishConfig": {
-    "access": "public"
-  },
+  "publishConfig": { "access": "public" },
   "description": "LLM-council PR review: many models, diverse lenses, one self-healing GitHub check. Also reviews your local diff before you push.",
   "type": "module",
   "bin": {
