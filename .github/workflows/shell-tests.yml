@@ -1,0 +1,35 @@
+name: shell-tests
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+concurrency:
+  group: shell-tests-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  shell-tests:
+    runs-on: ubicloud-standard-2
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      # One job, one step per suite. A failed step otherwise skips the rest,
+      # so each step after the first carries `if: !cancelled()` (the same
+      # pattern lint.yml uses for oxlint/jscpd/test): every suite runs even
+      # when an earlier one fails, and the job still goes red when any suite
+      # failed. Four parallel jobs would give the same property at the cost
+      # of four runners and four checkouts for sub-minute shell suites.
+      - name: budget-guard
+        run: bash scripts/budget-guard.test.sh
+      - name: proof-gate
+        if: ${{ !cancelled() }}
+        run: bash scripts/proof-gate.test.sh
+      - name: vcr-hooks
+        if: ${{ !cancelled() }}
+        run: bash scripts/vcr-hooks.test.sh
+      - name: chair-gate
+        if: ${{ !cancelled() }}
+        run: bash scripts/chair-gate.test.sh
