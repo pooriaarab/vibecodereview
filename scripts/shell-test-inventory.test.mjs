@@ -20,7 +20,14 @@ const onDisk = fs.readdirSync(scriptsDir).filter((f) => f.endsWith(".test.sh")).
 
 assert.ok(onDisk.length > 0, "expected at least one scripts/*.test.sh on disk");
 
-const missing = onDisk.filter((f) => !yaml.includes(`scripts/${f}`));
+// Split into one chunk per step so a filename has to appear in that step's own
+// `run:` line to count — a stray mention elsewhere in the YAML (a comment, a
+// different field) must not satisfy the check.
+const steps = yaml.split(/^\s*- name:/m).slice(1);
+const stepNames = steps.map((s) => s.trim().split("\n")[0].trim());
+const runLines = steps.map((s) => s.match(/^\s*run:.*$/m)?.[0] ?? "");
+
+const missing = onDisk.filter((f) => !runLines.some((line) => line.includes(`scripts/${f}`)));
 assert.deepEqual(
   missing,
   [],
@@ -29,14 +36,15 @@ assert.deepEqual(
 );
 
 // Each suite after the first must keep going when an earlier one fails, so one
-// run names every failure instead of only the first.
-const steps = yaml.split(/^\s*- name:/m).slice(1);
-const guarded = steps.filter((s) => s.includes("cancelled()")).length;
-assert.equal(
-  guarded,
-  steps.length - 1,
+// run names every failure instead of only the first. Check by position, not
+// by count: two unguarded steps and two extra guarded ones must not cancel
+// out into a passing total.
+const unguarded = stepNames.slice(1).filter((_, i) => !steps[i + 1].includes("cancelled()"));
+assert.deepEqual(
+  unguarded,
+  [],
   `every step after the first needs 'if: \${{ !cancelled() }}' or a failing suite skips the rest; ` +
-    `${guarded} of ${steps.length - 1} have it`,
+    `missing on: ${unguarded.join(", ")}`,
 );
 
 console.log(`ok - shell-tests.yml runs all ${onDisk.length} scripts/*.test.sh, keep-going intact`);
