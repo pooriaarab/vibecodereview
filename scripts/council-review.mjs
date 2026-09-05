@@ -202,7 +202,21 @@ async function main() {
 
   const diffFile = process.argv[2];
   const outFile = process.argv[3] || "council-findings.md";
-  const write = (md) => fs.writeFileSync(outFile, md);
+
+  // Read before ANY return below: every path out of main() — including the
+  // config and empty-diff gates above the trivial-delta gate — must preserve
+  // the carried-forward findings, or a cycle that exits early rewrites the
+  // review-state comment with an empty carry and silently drops every
+  // unresolved finding from earlier cycles.
+  const priorFindings = process.env.VCR_PRIOR_FINDINGS_FILE && fs.existsSync(process.env.VCR_PRIOR_FINDINGS_FILE)
+    ? fs.readFileSync(process.env.VCR_PRIOR_FINDINGS_FILE, "utf8")
+    : "";
+  // The ONLY way to write the report. It preserves the carry alongside it, so
+  // a future early return that uses `write` cannot forget the carry file.
+  const write = (md, carry = priorFindings) => {
+    fs.writeFileSync(outFile, md);
+    if (process.env.VCR_CARRY_FILE) fs.writeFileSync(process.env.VCR_CARRY_FILE, carry);
+  };
 
   const models = parseModels();
   if (models.length === 0) {
@@ -230,13 +244,10 @@ async function main() {
     return;
   }
 
-  // Read before the trivial-delta gate below: every skip path from here on
-  // must still surface carried-forward findings, or a delta that goes trivial
-  // right after a cycle that left a real finding open silently drops it from
-  // the report instead of carrying it to the next cycle.
-  const priorFindings = process.env.VCR_PRIOR_FINDINGS_FILE && fs.existsSync(process.env.VCR_PRIOR_FINDINGS_FILE)
-    ? fs.readFileSync(process.env.VCR_PRIOR_FINDINGS_FILE, "utf8")
-    : "";
+  // Every skip path from here on surfaces carried-forward findings in the
+  // report (via `carriedFindings` below); the `write` helper preserves them in
+  // the carry file too, or a delta that goes trivial right after a cycle that
+  // left a real finding open silently drops it instead of carrying it on.
   const baseReportOptions = {
     reviewHeadSha: process.env.VCR_REVIEW_HEAD_SHA,
     memberDiffNote: process.env.VCR_MEMBER_DIFF_NOTE,
@@ -318,26 +329,23 @@ async function main() {
   );
 
   const report = buildFindingsMarkdown(results, reportOptions);
-  write(report);
-  if (process.env.VCR_CARRY_FILE) {
-    // Keep a flat list of every candidate from every cycle. The chair decides
-    // which entries are fixed; dropping an older entry here would hide an
-    // unresolved finding merely because the next delta did not repeat it.
-    const current = results.map((r) => `## ${r.model.name} — ${r.model.lens} lens\n\n${r.error ? `_${r.error}_` : r.text}`).join("\n\n");
-    let combined = [current, priorFindings].filter(Boolean).join("\n\n");
-    // The workflow base64-encodes this into a single hidden PR comment, which
-    // GitHub caps at 65536 characters. Newest content (this cycle's own
-    // findings, then the most recently carried ones) sits at the front of
-    // `combined`, so cutting the tail drops the oldest carried text first —
-    // without this cap, an unbounded carry file makes the state-comment write
-    // fail silently (it runs with continue-on-error) and the review boundary
-    // goes stale.
-    const CARRY_CHAR_BUDGET = 45_000;
-    if (combined.length > CARRY_CHAR_BUDGET) {
-      combined = combined.slice(0, CARRY_CHAR_BUDGET) + "\n\n_[older carried findings dropped to keep the review-state comment under GitHub's size limit]_";
-    }
-    fs.writeFileSync(process.env.VCR_CARRY_FILE, combined);
+  // Keep a flat list of every candidate from every cycle. The chair decides
+  // which entries are fixed; dropping an older entry here would hide an
+  // unresolved finding merely because the next delta did not repeat it.
+  const current = results.map((r) => `## ${r.model.name} — ${r.model.lens} lens\n\n${r.error ? `_${r.error}_` : r.text}`).join("\n\n");
+  let combined = [current, priorFindings].filter(Boolean).join("\n\n");
+  // The workflow base64-encodes this into a single hidden PR comment, which
+  // GitHub caps at 65536 characters. Newest content (this cycle's own
+  // findings, then the most recently carried ones) sits at the front of
+  // `combined`, so cutting the tail drops the oldest carried text first —
+  // without this cap, an unbounded carry file makes the state-comment write
+  // fail silently (it runs with continue-on-error) and the review boundary
+  // goes stale.
+  const CARRY_CHAR_BUDGET = 45_000;
+  if (combined.length > CARRY_CHAR_BUDGET) {
+    combined = combined.slice(0, CARRY_CHAR_BUDGET) + "\n\n_[older carried findings dropped to keep the review-state comment under GitHub's size limit]_";
   }
+  write(report, combined);
   console.log(`Wrote ${outFile}`);
 }
 
