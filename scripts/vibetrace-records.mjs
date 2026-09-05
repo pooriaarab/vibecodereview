@@ -1,8 +1,9 @@
 // vibetrace record builders — council cost/routing plus defect measurement.
+import { parseChairVerdictsJson } from "./chair-verdicts.mjs";
 import { parseFindings } from "./file-findings.mjs";
 import { countAddedLines } from "./review-delta.mjs";
 
-export const SCHEMA_VERSION = "0.2.0";
+export const SCHEMA_VERSION = "0.3.0";
 
 // The prefix every skip path writes. Matching it is what keeps a skipped
 // review out of the `full` bucket; the table below only refines WHICH skip.
@@ -104,6 +105,45 @@ export function buildCouncilRecord(input) {
       addedLines: countAddedLines(diffMarkdown),
       findings: councilFindingsPayload(findingsMarkdown),
       attribution,
+    },
+  };
+}
+
+/**
+ * @param {{
+ *   attribution: Record<string, unknown>,
+ *   verdictsJson?: string,
+ *   verdictsMissing?: boolean,
+ * }} input
+ */
+export function buildChairRecord(input) {
+  const { attribution, verdictsJson, verdictsMissing = false } = input;
+  const base = {
+    schemaVersion: SCHEMA_VERSION,
+    ts: new Date().toISOString(),
+    type: "review.chair",
+    attribution,
+  };
+  if (verdictsMissing || verdictsJson === undefined) {
+    return {
+      ok: true,
+      record: { ...base, dispositionsMissing: true },
+    };
+  }
+  const parsed = parseChairVerdictsJson(verdictsJson);
+  if (!parsed.ok) {
+    return {
+      ok: true,
+      record: { ...base, dispositionsMissing: true },
+    };
+  }
+  return {
+    ok: true,
+    record: {
+      ...base,
+      dispositionsMissing: false,
+      verdict: parsed.verdict,
+      dispositions: parsed.dispositions,
     },
   };
 }

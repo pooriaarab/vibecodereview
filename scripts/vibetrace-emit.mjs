@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 // Silent-fail vibetrace emitter for council runs. Matches @vibetrace/schema
-// the review.council shape. Never throws; never blocks the review check.
+// review.council and review.chair shapes. Never throws; never blocks the review check.
 //
 // Usage:
 //   node vibetrace-emit.mjs review.council \
 //     --mode delta|full --cache-hit 0|1 --members N --cancelled 0|1 \
 //     [--findings council-findings.md] [--diff pr-delta.diff]
+//   node vibetrace-emit.mjs review.chair [--verdicts chair-verdicts.json]
 //
 // Env (all optional): VIBETRACE_INGEST_URL, VIBETRACE_INGEST_TOKEN, VIBETRACE_FILE,
 // GITHUB_REPOSITORY, VCR_PR / GITHUB_PR_NUMBER, GITHUB_HEAD_REF,
@@ -13,7 +14,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { buildCouncilRecord } from "./vibetrace-records.mjs";
+import { buildChairRecord, buildCouncilRecord } from "./vibetrace-records.mjs";
 
 function arg(name, fallback = undefined) {
   const i = process.argv.indexOf(name);
@@ -27,6 +28,16 @@ function readOptional(file) {
     return fs.readFileSync(file, "utf8");
   } catch {
     return "";
+  }
+}
+
+function readVerdicts(file) {
+  if (!file) return { missing: true };
+  if (!fs.existsSync(file)) return { missing: true };
+  try {
+    return { missing: false, content: fs.readFileSync(file, "utf8") };
+  } catch {
+    return { missing: true };
   }
 }
 
@@ -86,7 +97,15 @@ function buildRecord(kind) {
       diffMarkdown: readOptional(arg("--diff")),
     });
   }
-  return { ok: false, reason: `unsupported type; only review.council` };
+  if (kind === "review.chair") {
+    const verdictsFile = arg("--verdicts", "chair-verdicts.json");
+    const verdicts = readVerdicts(verdictsFile);
+    if (verdicts.missing) {
+      return buildChairRecord({ attribution: attr, verdictsMissing: true });
+    }
+    return buildChairRecord({ attribution: attr, verdictsJson: verdicts.content });
+  }
+  return { ok: false, reason: `unsupported type; only review.council and review.chair` };
 }
 
 async function emit(record) {

@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  buildChairRecord,
   buildCouncilRecord,
   detectStrength,
 } from "./vibetrace-records.mjs";
@@ -134,6 +135,49 @@ fs.rmSync(tmp, { recursive: true, force: true });
     failed++;
   } else {
     console.log("ok - a quoted skip marker is content, an anchored one is a skip");
+  }
+}
+
+// --- review.chair: missing verdicts must not look like zero findings ----------
+{
+  const missing = buildChairRecord({ attribution: {}, verdictsMissing: true });
+  if (!missing.ok || missing.record.dispositionsMissing !== true) {
+    console.error("FAIL missing verdicts must set dispositionsMissing", missing.record);
+    failed++;
+  } else if ("dispositions" in missing.record || "verdict" in missing.record) {
+    console.error("FAIL missing verdicts must not include dispositions or verdict", missing.record);
+    failed++;
+  } else {
+    console.log("ok - missing chair-verdicts.json sets dispositionsMissing without zero findings");
+  }
+
+  const validJson = JSON.stringify({
+    verdict: "comment",
+    dispositions: [
+      { id: "abc123", disposition: "confirmed-fixed" },
+      { id: "def456", disposition: "rejected" },
+    ],
+  });
+  const present = buildChairRecord({ attribution: {}, verdictsJson: validJson });
+  if (!present.ok || present.record.dispositionsMissing !== false) {
+    console.error("FAIL valid verdicts must clear dispositionsMissing", present.record);
+    failed++;
+  } else if (present.record.verdict !== "comment" || present.record.dispositions?.length !== 2) {
+    console.error("FAIL valid verdicts shape", present.record);
+    failed++;
+  } else {
+    console.log("ok - valid chair-verdicts.json parses into dispositions");
+  }
+
+  const malformed = buildChairRecord({ attribution: {}, verdictsJson: "{ not json" });
+  if (!malformed.ok || malformed.record.dispositionsMissing !== true) {
+    console.error("FAIL malformed verdicts must set dispositionsMissing", malformed.record);
+    failed++;
+  } else if ("dispositions" in malformed.record) {
+    console.error("FAIL malformed verdicts must not include dispositions array", malformed.record);
+    failed++;
+  } else {
+    console.log("ok - malformed chair-verdicts.json fails open with dispositionsMissing");
   }
 }
 

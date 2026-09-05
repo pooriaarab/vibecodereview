@@ -80,7 +80,7 @@ inputs:
     required: false
     default: ""
   vibetrace_ingest_url:
-    description: "Optional POST endpoint for vibetrace review.council records. When unset, the emit step writes JSONL under RUNNER_TEMP and never fails the review."
+    description: "Optional POST endpoint for vibetrace review.council and review.chair records. When unset, the emit step writes JSONL under RUNNER_TEMP and never fails the review."
     required: false
     default: ""
   vibetrace_ingest_token:
@@ -494,6 +494,19 @@ runs:
            not trigger workflows for GITHUB_TOKEN pushes, so no later run posts the
            approval that would supersede the block. Only a human dismissing the review
            can. See issue #43.
+        6c. Before posting your review, Write `chair-verdicts.json` in the workspace root
+           (next to `council-findings.md`) with your verdict and one disposition per council
+           finding. Read the `<!-- vibetrace:findings-meta` block at the end of
+           `council-findings.md` for finding ids. JSON shape:
+             {
+               "verdict": "approve" | "comment" | "request-changes",
+               "dispositions": [
+                 { "id": "<finding id>", "disposition": "confirmed-fixed" | "confirmed-open" | "rejected" | "unmentioned" }
+               ]
+             }
+           Use `confirmed-fixed` when you fixed it this run, `confirmed-open` when you verified
+           it and it remains open, `rejected` when you discarded it, `unmentioned` when you did
+           not address it. Include every id from findings-meta; the verdict must match step 6.
         7. In the review body include a collapsible council table:
            `<details><summary>🧑‍⚖️ Council</summary>` then a Markdown table of
            `| Model | Lens | Result |` (confirmed / rejected / no findings), then `</details>`.
@@ -936,6 +949,22 @@ runs:
         echo "Most often: the pull request edits .github/workflows/vibecodereview.yml, and"
         echo "claude-code-action refuses to run when the workflow differs from the default branch."
         exit 1
+
+    # Observability only. Silent-fail inside the script. Never gates the review.
+    - name: Emit vibetrace review.chair
+      if: always() && steps.budget.outputs.over != 'true'
+      continue-on-error: true
+      shell: bash
+      env:
+        VIBETRACE_INGEST_URL: ${{ inputs.vibetrace_ingest_url }}
+        VIBETRACE_INGEST_TOKEN: ${{ inputs.vibetrace_ingest_token }}
+        GITHUB_REPOSITORY: ${{ github.repository }}
+        VCR_PR: ${{ github.event.pull_request.number }}
+        GITHUB_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        VCR_PR_BODY: ${{ github.event.pull_request.body }}
+      run: |
+        node "${{ github.action_path }}/scripts/vibetrace-emit.mjs" review.chair \
+          --verdicts chair-verdicts.json
 
     # Persist the review boundary and the findings that still need a chair's
     # verification. Updating one hidden comment avoids adding visible noise to

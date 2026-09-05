@@ -257,5 +257,54 @@ await new Promise((resolve, reject) => {
 });
 
 fs.rmSync(tmp, { recursive: true, force: true });
+
+// --- review.chair end-to-end via CLI -----------------------------------------
+const chairTmp = fs.mkdtempSync(path.join(os.tmpdir(), "vcr-chair-emit-"));
+const chairFile = path.join(chairTmp, "traces.jsonl");
+const verdictsPath = path.join(chairTmp, "chair-verdicts.json");
+fs.writeFileSync(
+  verdictsPath,
+  JSON.stringify({
+    verdict: "request-changes",
+    dispositions: [{ id: "f1", disposition: "confirmed-open" }],
+  }),
+);
+const chairOk = run(
+  ["review.chair", "--verdicts", verdictsPath],
+  { VIBETRACE_FILE: chairFile, GITHUB_REPOSITORY: "pooriaarab/vibecodereview", VCR_PR: "137" },
+);
+if (chairOk.status !== 0) {
+  console.error("FAIL review.chair exit", chairOk.status, chairOk.stderr);
+  failed++;
+} else {
+  const rec = JSON.parse(fs.readFileSync(chairFile, "utf8").trim());
+  if (rec.type !== "review.chair" || rec.verdict !== "request-changes" || rec.dispositionsMissing !== false) {
+    console.error("FAIL review.chair record shape", rec);
+    failed++;
+  } else {
+    console.log("ok - CLI emits review.chair with dispositions");
+  }
+}
+
+const missingFile = path.join(chairTmp, "missing.jsonl");
+const missingVerdicts = path.join(chairTmp, "no-such-chair-verdicts.json");
+const chairMissing = run(
+  ["review.chair", "--verdicts", missingVerdicts],
+  { VIBETRACE_FILE: missingFile },
+);
+if (chairMissing.status !== 0) {
+  console.error("FAIL missing verdicts file exit", chairMissing.status, chairMissing.stderr);
+  failed++;
+} else {
+  const rec = JSON.parse(fs.readFileSync(missingFile, "utf8").trim());
+  if (rec.dispositionsMissing !== true || "dispositions" in rec) {
+    console.error("FAIL missing verdicts file must set dispositionsMissing, not zero findings", rec);
+    failed++;
+  } else {
+    console.log("ok - missing chair-verdicts.json sets dispositionsMissing via CLI");
+  }
+}
+fs.rmSync(chairTmp, { recursive: true, force: true });
+
 if (failed) process.exit(1);
 console.log("vibetrace-emit tests passed");
