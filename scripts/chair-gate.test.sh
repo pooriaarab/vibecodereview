@@ -155,5 +155,14 @@ OVER_BUDGET=false P=success B=skipped T=skipped Q=skipped F=skipped TOKEN_1=live
   REVIEWS_JSON="[$(claude_review)]" \
   check_output lacks '::warning::' 'a live primary token warns of nothing'
 
+# Trivial-delta path: every model chair is skipped. A cheap step must still
+# post a review the gate can see, or the check never concludes.
+OVER_BUDGET=false P=skipped B=skipped T=skipped Q=skipped F=skipped REVIEWS_JSON="[$(fallback_review)]" \
+  check 0 'a trivial-path review still passes the gate'
+OVER_BUDGET=false P=skipped B=skipped T=skipped Q=skipped F=skipped REVIEWS_JSON="[$(vibecodereview_review)]" \
+  check 0 'a trivial-path review under vibecodereview[bot] still passes the gate'
+OVER_BUDGET=false P=skipped B=skipped T=skipped Q=skipped F=skipped REVIEWS_JSON='[]' \
+  check 1 'skipping every chair without posting fails the gate'
+
 [ "$fails" = 0 ] || { printf '\n%s failing\n' "$fails" >&2; exit 1; }
 printf '\nall passing\n'

@@ -245,6 +245,7 @@ runs:
     # two steps — the CLI install, the fix-cycle guard, the prompt build — now
     # runs inside the council's own latency instead of after it.
     - name: Council fan-out (start)
+      id: council_start
       if: steps.budget.outputs.over != 'true'
       shell: bash
       continue-on-error: true
@@ -284,7 +285,7 @@ runs:
         # it lives under .git/vcr-hooks, outside the working tree `git add -A`
         # walks.
         printf '%s\n' /pr.diff /pr-delta.diff /council-findings.md /council-carry.md /council-carry.next.md /review-state.md /council.log /council.pid \
-          /probe.1 /probe.2 /probe.3 /reason.1 /reason.2 /reason.3 /council-stats.json \
+          /probe.1 /probe.2 /probe.3 /reason.1 /reason.2 /reason.3 /council-stats.json /trivial-review.md \
           >> "$(git rev-parse --git-dir)/info/exclude"
 
         # Keep the chair's evidence complete, but make council member calls
@@ -363,12 +364,22 @@ runs:
         # neither problem, because no PR content ever reaches it.
         printf 'VCR_CHAIR_VERDICTS=%s\n' "$RUNNER_TEMP/chair-verdicts.json" >> "$GITHUB_ENV"
         printf '%s\n' /council-carry.next.md >> "$(git rev-parse --git-dir)/info/exclude"
+        # Classify here, before the CLI install and token probe, so a docs-only
+        # delta can skip every model chair. Fail open: only an exact `true`
+        # skips the chair. A crash, a missing file, or anything else keeps it.
+        TRIVIAL=false
+        if [ -f pr-delta.diff ]; then
+          CLASSIFY="$(node "${{ github.action_path }}/scripts/trivial-chair.mjs" --classify pr-delta.diff 2>/dev/null || true)"
+          [ "$CLASSIFY" = "true" ] && TRIVIAL=true
+        fi
+        echo "trivial=$TRIVIAL" >> "$GITHUB_OUTPUT"
         nohup node "${{ github.action_path }}/scripts/council-review.mjs" \
           pr.diff council-findings.md > council.log 2>&1 &
         echo $! > council.pid
         echo "council started (pid $(cat council.pid))"
 
     - name: Install Claude Code CLI
+      if: steps.council_start.outputs.trivial != 'true'
       # anthropics/claude-code-action expects the Claude Code native binary at
       # ~/.local/bin/claude; install it here so the chair step never dies with
       # "native binary not found". GITHUB_PATH persists into later steps.
@@ -393,6 +404,7 @@ runs:
 
     - name: Fix-cycle guard
       id: cycle
+      if: steps.council_start.outputs.trivial != 'true'
       shell: bash
       run: |
         # Count our own consecutive commits at HEAD. After the limit, stop
@@ -421,6 +433,7 @@ runs:
     # copies of a 40-line prompt that must never drift.
     - name: Build chair prompt
       id: prompt
+      if: steps.council_start.outputs.trivial != 'true'
       shell: bash
       env:
         VCR_PR: ${{ github.event.pull_request.number }}
@@ -600,6 +613,7 @@ runs:
     # measured) instead of adding to the critical path.
     - name: Probe chair tokens
       id: chair_probe
+      if: steps.council_start.outputs.trivial != 'true'
       shell: bash
       env:
         VCR_T1: ${{ inputs.claude_code_oauth_token }}
@@ -738,7 +752,7 @@ runs:
     # SlashCommand/ExitPlanMode (not applicable here).
     - name: Chair review (primary token)
       id: chair_primary
-      if: steps.budget.outputs.over != 'true' && steps.chair_probe.outputs.token_1 != 'dead'
+      if: steps.budget.outputs.over != 'true' && steps.council_start.outputs.trivial != 'true' && steps.chair_probe.outputs.token_1 != 'dead'
       continue-on-error: true
       uses: anthropics/claude-code-action@v1
       with:
@@ -759,14 +773,14 @@ runs:
     # that already decides whether that attempt runs, so a still-running
     # earlier success (which skips every later attempt) is never touched.
     - name: Clear stale chair-verdicts.json before backup attempt
-      if: steps.budget.outputs.over != 'true' && steps.chair_primary.outcome != 'success'
+      if: steps.budget.outputs.over != 'true' && steps.council_start.outputs.trivial != 'true' && steps.chair_primary.outcome != 'success'
       continue-on-error: true
       shell: bash
       run: rm -f "$VCR_CHAIR_VERDICTS"
 
     - name: Chair review (backup token)
       id: chair_backup
-      if: steps.budget.outputs.over != 'true' && steps.chair_primary.outcome != 'success' && steps.chair_probe.outputs.token_2 != 'dead' && inputs.claude_code_oauth_token_2 != ''
+      if: steps.budget.outputs.over != 'true' && steps.council_start.outputs.trivial != 'true' && steps.chair_primary.outcome != 'success' && steps.chair_probe.outputs.token_2 != 'dead' && inputs.claude_code_oauth_token_2 != ''
       continue-on-error: true
       uses: anthropics/claude-code-action@v1
       with:
@@ -777,14 +791,14 @@ runs:
         claude_args: '--allowed-tools "Bash(gh api:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr review:*),Bash(gh pr comment:*),Bash(git:*),Bash(jq:*),Bash(cat:*),Bash(ls:*),Bash(head:*),Bash(wc:*),Read,Glob,Grep,Edit,Write,TodoWrite"'
 
     - name: Clear stale chair-verdicts.json before third attempt
-      if: steps.budget.outputs.over != 'true' && steps.chair_primary.outcome != 'success' && steps.chair_backup.outcome != 'success'
+      if: steps.budget.outputs.over != 'true' && steps.council_start.outputs.trivial != 'true' && steps.chair_primary.outcome != 'success' && steps.chair_backup.outcome != 'success'
       continue-on-error: true
       shell: bash
       run: rm -f "$VCR_CHAIR_VERDICTS"
 
     - name: Chair review (third token)
       id: chair_third
-      if: steps.budget.outputs.over != 'true' && steps.chair_primary.outcome != 'success' && steps.chair_backup.outcome != 'success' && steps.chair_probe.outputs.token_3 != 'dead' && inputs.claude_code_oauth_token_3 != ''
+      if: steps.budget.outputs.over != 'true' && steps.council_start.outputs.trivial != 'true' && steps.chair_primary.outcome != 'success' && steps.chair_backup.outcome != 'success' && steps.chair_probe.outputs.token_3 != 'dead' && inputs.claude_code_oauth_token_3 != ''
       continue-on-error: true
       uses: anthropics/claude-code-action@v1
       with:
@@ -795,14 +809,14 @@ runs:
         claude_args: '--allowed-tools "Bash(gh api:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr review:*),Bash(gh pr comment:*),Bash(git:*),Bash(jq:*),Bash(cat:*),Bash(ls:*),Bash(head:*),Bash(wc:*),Read,Glob,Grep,Edit,Write,TodoWrite"'
 
     - name: Clear stale chair-verdicts.json before fourth attempt
-      if: steps.budget.outputs.over != 'true' && steps.chair_primary.outcome != 'success' && steps.chair_backup.outcome != 'success' && steps.chair_third.outcome != 'success'
+      if: steps.budget.outputs.over != 'true' && steps.council_start.outputs.trivial != 'true' && steps.chair_primary.outcome != 'success' && steps.chair_backup.outcome != 'success' && steps.chair_third.outcome != 'success'
       continue-on-error: true
       shell: bash
       run: rm -f "$VCR_CHAIR_VERDICTS"
 
     - name: Chair review (fourth token)
       id: chair_fourth
-      if: steps.budget.outputs.over != 'true' && steps.chair_primary.outcome != 'success' && steps.chair_backup.outcome != 'success' && steps.chair_third.outcome != 'success' && steps.chair_probe.outputs.token_4 != 'dead' && inputs.claude_code_oauth_token_4 != ''
+      if: steps.budget.outputs.over != 'true' && steps.council_start.outputs.trivial != 'true' && steps.chair_primary.outcome != 'success' && steps.chair_backup.outcome != 'success' && steps.chair_third.outcome != 'success' && steps.chair_probe.outputs.token_4 != 'dead' && inputs.claude_code_oauth_token_4 != ''
       continue-on-error: true
       uses: anthropics/claude-code-action@v1
       with:
@@ -821,6 +835,7 @@ runs:
     - name: Clear stale chair-verdicts.json before fallback
       if: >-
         steps.budget.outputs.over != 'true' &&
+        steps.council_start.outputs.trivial != 'true' &&
         steps.chair_primary.outcome != 'success' &&
         steps.chair_backup.outcome != 'success' &&
         steps.chair_third.outcome != 'success' &&
@@ -841,6 +856,7 @@ runs:
       id: chair_fallback
       if: >-
         steps.budget.outputs.over != 'true' &&
+        steps.council_start.outputs.trivial != 'true' &&
         steps.chair_primary.outcome != 'success' &&
         steps.chair_backup.outcome != 'success' &&
         steps.chair_third.outcome != 'success' &&
@@ -919,6 +935,20 @@ runs:
         else
           gh api "repos/$VCR_REPO/issues/$VCR_PR/comments" -X POST -F body=@budget-comment.md --silent
         fi
+
+    # Docs-only / lockfile deltas skip every model chair. This step is the
+    # stand-in: one `gh pr review --comment`, no model call. The result gate
+    # below still runs and still demands a posted review, so a required check
+    # cannot sit pending and cannot go green with nothing posted.
+    - name: Trivial delta review
+      id: trivial_review
+      if: steps.budget.outputs.over != 'true' && steps.council_start.outputs.trivial == 'true'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github_token }}
+        GITHUB_REPOSITORY: ${{ github.repository }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+      run: node "${{ github.action_path }}/scripts/trivial-chair.mjs"
 
     # The gate asks whether a review was POSTED, not whether a step exited 0.
     #

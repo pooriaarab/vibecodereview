@@ -33,3 +33,6 @@ jobs:
       - name: chair-gate
         if: ${{ !cancelled() }}
         run: bash scripts/chair-gate.test.sh
+      - name: chair-trivial
+        if: ${{ !cancelled() }}
+        run: bash scripts/chair-trivial.test.sh
