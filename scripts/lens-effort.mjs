@@ -43,7 +43,14 @@ export function isEffortPosition(value) {
  */
 export function parseEffortPosition(raw) {
   const normalized = raw.trim().toLowerCase();
-  const named = EFFORT_ALIASES[normalized === "med" ? "medium" : normalized];
+  // Object.hasOwn, not a bare lookup: `constructor` and `__proto__` survive
+  // toLowerCase unchanged and resolve to inherited prototype members, so a bare
+  // index returns the Object constructor rather than undefined. The member is
+  // then marked configured with a non-numeric position, resolveRung coerces it
+  // to NaN, and the effort is dropped SILENTLY — the one outcome this module
+  // exists to prevent.
+  const key = normalized === "med" ? "medium" : normalized;
+  const named = Object.hasOwn(EFFORT_ALIASES, key) ? EFFORT_ALIASES[key] : undefined;
   if (named !== undefined) return named;
   const numeric = Number(normalized);
   return normalized !== "" && isEffortPosition(numeric) ? numeric : undefined;

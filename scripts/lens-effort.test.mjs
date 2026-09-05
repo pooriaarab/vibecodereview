@@ -173,4 +173,32 @@ assert.notEqual(cacheKey(diff, parseErrorMember), cacheKey(diff, member));
   }
 }
 
+// An inherited Object.prototype name must not resolve to a level. `constructor`
+// and `__proto__` survive toLowerCase unchanged, so a bare bracket lookup hands
+// back a prototype member; the member is then marked configured with a
+// non-numeric position and the effort is dropped SILENTLY, which is exactly the
+// outcome "an invalid effort is unrepresentable" is supposed to rule out.
+for (const inherited of [
+  "constructor",
+  "__proto__",
+  "__defineGetter__",
+  "__defineSetter__",
+  "__lookupGetter__",
+  "__lookupSetter__",
+  "hasOwnProperty",
+  "isPrototypeOf",
+  "propertyIsEnumerable",
+  "toString",
+  "valueOf",
+]) {
+  assert.equal(
+    parseEffortPosition(inherited),
+    undefined,
+    `${inherited} must not parse as an effort level`,
+  );
+}
+// The real aliases still work, including the "med" shorthand.
+assert.equal(parseEffortPosition("med"), 0.25);
+assert.equal(parseEffortPosition("medium"), 0.25);
+
 console.log("lens effort tests passed");
