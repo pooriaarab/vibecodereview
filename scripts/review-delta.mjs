@@ -70,7 +70,7 @@ export function shouldWriteReviewState(repositoryPrivate) {
 
 export function buildFindingsMarkdown(
   results,
-  { diffTruncated, contextTruncated, mutationSkipped, reviewHeadSha, memberDiffNote, skippedLenses, carriedFindings } = {},
+  { diffTruncated, contextTruncated, mutationSkipped, reviewHeadSha, memberDiffNote, skippedLenses, skippedReason, reviewWeight, carriedFindings } = {},
 ) {
   const lines = ["# 🧑‍⚖️ LLM Council findings", ""];
   lines.push(
@@ -79,8 +79,12 @@ export function buildFindingsMarkdown(
   );
   if (reviewHeadSha) lines.push(`> Reviewed head: \`${reviewHeadSha}\`.`, "");
   if (memberDiffNote) lines.push(`> Member diff: ${memberDiffNote}`, "");
+  if (reviewWeight && reviewWeight !== "full") {
+    lines.push(`> Review weight: ${reviewWeight}.`, "");
+  }
   if (skippedLenses?.length) {
-    lines.push(`> Lenses not dispatched: ${skippedLenses.join(", ")} (the member delta did not touch files they review).`, "");
+    const why = skippedReason || "not dispatched this run";
+    lines.push(`> Lenses not dispatched: ${skippedLenses.join(", ")} (${why}).`, "");
   }
   if (diffTruncated && contextTruncated) {
     lines.push("> ⚠️ Diff and PR context were truncated for length; council saw the first portion of each.", "");

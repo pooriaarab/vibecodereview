@@ -99,7 +99,7 @@ function readStats(statsFile) {
   const run = runEngine(CODE_DIFF, "", {
     CUSTOM_BASE_URL: "http://127.0.0.1:1/chat/completions",
     CUSTOM_API_KEY: "dummy",
-    COUNCIL_MODELS: "custom|m1|M1|correctness,custom|m2|M2|performance",
+    COUNCIL_MODELS: "custom|m1|M1|correctness,custom|m2|M2|security",
   });
   assert.equal(run.result.status, 0, `engine exited ${run.result.status}: ${run.result.stderr}`);
   const stats = readStats(run.statsFile);
@@ -107,6 +107,7 @@ function readStats(statsFile) {
   assert.equal(stats.cacheHit, false, `no cached member must report false: ${JSON.stringify(stats)}`);
   const report = fs.readFileSync(run.outFile, "utf8");
   assert.ok(report.includes("M1 — correctness lens"), "dispatched headings must stay in the report");
+  assert.ok(report.includes("M2 — security lens"), "both core-weight lenses must stay in the report");
   assert.ok(!report.includes("(cached)"), "uncached run must not mark headings cached");
   const { members, cacheHit } = readStatsViaAction(run.statsFile);
   assert.equal(members, "2", `reader script must derive 2 members: ${members}`);

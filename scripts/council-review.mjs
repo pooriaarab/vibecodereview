@@ -52,6 +52,7 @@ import { cacheKey, loadCouncilResults, saveCouncilResult } from "./council-cache
 import { withLensEffort } from "./lens-effort-config.mjs";
 import { behavioralSurface } from "./behavioral-surface.mjs";
 import { filterMembersByKindRouting, lensesForKinds, routeLenses } from "./lens-routing.mjs";
+import { filterMembersByWeight } from "./review-weight.mjs";
 import { appendFindingsMeta } from "./file-findings.mjs";
 
 // Council run stats for the telemetry record: how many members THIS run
@@ -308,13 +309,28 @@ async function main() {
   if (mutationSkipped) console.log(`Mutation lens enabled but not dispatched: ${mutationSkipped}`);
   const kindRouting = filterMembersByKindRouting(members, memberDiffRaw);
   members = kindRouting.members;
-  skippedLenses.push(...kindRouting.skippedLenses);
+  const weighted = filterMembersByWeight(members, memberDiffRaw);
+  members = weighted.members;
+  skippedLenses.push(...kindRouting.skippedLenses, ...weighted.skippedLenses);
   skippedLenses = [...new Set(skippedLenses)];
-  const reportOptions = { ...baseReportOptions, skippedLenses, mutationSkipped };
+  const skipWhy = weighted.weight !== "full"
+    ? `review weight: ${weighted.weight}`
+    : "the member delta did not touch files they review";
+  const reportOptions = {
+    ...baseReportOptions,
+    skippedLenses,
+    skippedReason: skipWhy,
+    reviewWeight: weighted.weight,
+    mutationSkipped,
+  };
+  if (weighted.weight !== "full") console.log(`Review weight: ${weighted.weight} (${weighted.reason})`);
 
   if (members.length === 0) {
-    write(buildFindingsMarkdown([], reportOptions) + "\n\n_Council skipped: no configured lens applies to the member delta._\n");
-    console.log("No applicable council lenses — skipped.");
+    const why = weighted.weight === "chair"
+      ? "review weight chair — style-only delta, the chair reviews alone"
+      : "no configured lens applies to the member delta";
+    write(buildFindingsMarkdown([], reportOptions) + `\n\n_Council skipped: ${why}._\n`);
+    console.log(weighted.weight === "chair" ? "Review weight chair — council skipped." : "No applicable council lenses — skipped.");
     return;
   }
   // Cache keys use the exact input each member receives: scope sees the full

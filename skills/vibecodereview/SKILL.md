@@ -6,7 +6,10 @@ description: Review a code diff with a council of AI models before pushing or me
 # vibecodereview — council diff review
 
 Send a diff to several models at once, each reviewing through a different lens,
-then read back the combined findings. Catches what one reviewer misses.
+then read back the combined findings. Catches what one reviewer misses. Low-risk
+deltas (CSS, tests, ordinary source) dispatch a smaller council so the review
+finishes faster; auth, payments, CI, and agent-instruction changes still get
+the full roster. `VCR_REVIEW_WEIGHT=off` turns that shrinking off.
 
 ## Review the working diff
 

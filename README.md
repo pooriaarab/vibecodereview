@@ -52,10 +52,28 @@ above already skips the whole council, scope included, before any lens is dispat
 Routing only decides the roster once a delta has at least one non-inert path — a
 dependency-manifest-only push (`package.json`, `go.mod`, ...) keeps scope, correctness,
 and security; a test-only push keeps scope, correctness, and maintainability; a
-style-only push keeps scope and performance. An unparseable diff fails open and
+style-only push keeps scope and performance — review weight then drops that
+pair so the chair reviews CSS alone. An unparseable diff fails open and
 dispatches every lens. Dropped lenses are listed in the findings as "Lenses not dispatched".
 
 Set `VCR_LENS_ROUTING=off` to disable routing and dispatch the full roster.
+
+### Review weight
+
+Kind routing asks whether a lens can speak to the files. Review weight asks
+whether the delta needs more than one or two speakers. It runs after routing:
+
+| Weight | When | Council |
+| --- | --- | --- |
+| chair | style-only (CSS/SCSS/Less/Sass) | none — Claude reviews alone |
+| light | tests and/or dependency manifests, no source | correctness plus security or maintainability |
+| core | ordinary source | correctness and security |
+| full | CI, agent instructions, high-risk paths (auth, payments, migrations, secrets), or an unparseable diff | whatever routing kept |
+
+The chair still runs either way, and still judges whether the diff matches the
+claim. Scope drops on chair/light/core because that job is already the chair's.
+An unparseable diff fails open to `full`. Set `VCR_REVIEW_WEIGHT=off` on the
+`uses:` step to restore the routed roster with no further shrinking.
 
 The scope lens reads the PR's title, body, and linked issues from `PR_CONTEXT_FILE` when available to verify the diff matches the author's claim.
 
