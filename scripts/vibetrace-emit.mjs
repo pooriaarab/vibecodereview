@@ -103,7 +103,11 @@ function buildRecord(kind) {
     if (verdicts.missing) {
       return buildChairRecord({ attribution: attr, verdictsMissing: true });
     }
-    return buildChairRecord({ attribution: attr, verdictsJson: verdicts.content });
+    // Pass the report too, or coverage is never checked in production and the
+    // validation exists only in tests.
+    const findingsFile = arg("--findings", "council-findings.md");
+    const findingsMarkdown = fs.existsSync(findingsFile) ? fs.readFileSync(findingsFile, "utf8") : undefined;
+    return buildChairRecord({ attribution: attr, verdictsJson: verdicts.content, findingsMarkdown });
   }
   return { ok: false, reason: `unsupported type; only review.council and review.chair` };
 }

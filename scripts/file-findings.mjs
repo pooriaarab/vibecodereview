@@ -98,6 +98,25 @@ export function findingsMetaBlock(findings) {
   return `\n<!-- vibetrace:findings-meta\n${JSON.stringify(payload)}\n-->\n`;
 }
 
+/**
+ * Read back the ids the council actually recorded. The chair's verdict file is
+ * checked against these: a disposition set that omits, duplicates or invents an
+ * id is not a complete verdict, and recording it as one is how an unverified
+ * claim reaches the promotion counter.
+ * @returns {string[] | null} ids, or null when no meta block is present
+ */
+export function parseFindingsMeta(markdown) {
+  const match = /<!-- vibetrace:findings-meta\n([\s\S]*?)\n-->/.exec(String(markdown || ''));
+  if (!match) return null;
+  try {
+    const parsed = JSON.parse(match[1]);
+    if (!Array.isArray(parsed)) return null;
+    return parsed.map((f) => f?.id).filter((id) => typeof id === 'string' && id);
+  } catch {
+    return null;
+  }
+}
+
 export function appendFindingsMeta(markdown) {
   return `${String(markdown || '').trimEnd()}${findingsMetaBlock(parseFindings(markdown))}`;
 }

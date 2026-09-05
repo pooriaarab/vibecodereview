@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { appendFindingsMeta, parseFindingsMeta } from "./file-findings.mjs";
 import {
   buildChairRecord,
   buildCouncilRecord,
@@ -178,6 +179,47 @@ fs.rmSync(tmp, { recursive: true, force: true });
     failed++;
   } else {
     console.log("ok - malformed chair-verdicts.json fails open with dispositionsMissing");
+  }
+}
+
+// A well-formed verdict file is not a complete one. A set that omits,
+// duplicates or invents a finding id is not a verdict on this run, and
+// recording it with dispositionsMissing:false hands the promotion counter a
+// claim no chair made.
+{
+  const report = appendFindingsMeta(
+    "## GPT — security lens\n\n- `a.ts:1` — bad -> fix.\n- `b.ts:2` — worse -> fix.\n",
+  );
+  const ids = parseFindingsMeta(report);
+  const body = (ds) => JSON.stringify({ verdict: "comment", dispositions: ds });
+  const rec = (ds, md = report) =>
+    buildChairRecord({ verdictsJson: body(ds), findingsMarkdown: md, attribution: {} }).record;
+  const all = ids.map((id) => ({ id, disposition: "confirmed-open" }));
+
+  const complete = rec(all);
+  if (complete.dispositionsMissing !== false || complete.coverageUnverified !== false) {
+    console.error("FAIL a complete disposition set must be trusted", complete);
+    failed++;
+  }
+  for (const [label, ds] of [
+    ["omits a finding", [all[0]]],
+    ["duplicates a finding", [all[0], { id: ids[0], disposition: "rejected" }, all[1]]],
+    ["invents a finding", [...all, { id: "forged", disposition: "confirmed-fixed" }]],
+  ]) {
+    const r = rec(ds);
+    if (r.dispositionsMissing !== true || !r.dispositionsRejected) {
+      console.error(`FAIL a set that ${label} must not be recorded as a complete verdict`, r);
+      failed++;
+    }
+  }
+  // No meta block means nothing to check against, not a failure — but the
+  // reader must be able to tell that apart from a verified set.
+  const unchecked = rec([{ id: "x", disposition: "confirmed-open" }], "## x\n");
+  if (unchecked.dispositionsMissing !== false || unchecked.coverageUnverified !== true) {
+    console.error("FAIL an unverifiable set must be flagged, not failed", unchecked);
+    failed++;
+  } else {
+    console.log("ok - disposition coverage is checked against the recorded findings");
   }
 }
 

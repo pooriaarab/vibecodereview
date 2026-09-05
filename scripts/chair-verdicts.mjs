@@ -60,3 +60,33 @@ export function parseChairVerdictsJson(raw) {
   }
   return { ok: true, verdict, dispositions };
 }
+
+/**
+ * Cross-check a parsed verdict set against the ids the council actually
+ * recorded. A set that omits, duplicates or invents an id is not a complete
+ * verdict, and accepting it as one lets an unverified claim reach the
+ * promotion counter with `dispositionsMissing: false` — the single thing this
+ * record exists to prevent.
+ *
+ * `knownIds` of null means the report carried no meta block (an older report,
+ * or an errored run). There is nothing to check against, so the set passes
+ * rather than being failed on absent evidence.
+ *
+ * @param {{ id: string }[]} dispositions
+ * @param {string[] | null} knownIds
+ * @returns {{ ok: true } | { ok: false, reason: string }}
+ */
+export function verifyDispositionCoverage(dispositions, knownIds) {
+  if (knownIds === null) return { ok: true };
+  const seen = new Set();
+  for (const { id } of dispositions) {
+    if (seen.has(id)) return { ok: false, reason: `duplicate disposition for ${id}` };
+    seen.add(id);
+  }
+  const known = new Set(knownIds);
+  const unknown = [...seen].filter((id) => !known.has(id));
+  if (unknown.length > 0) return { ok: false, reason: `disposition for unknown finding ${unknown[0]}` };
+  const missing = knownIds.filter((id) => !seen.has(id));
+  if (missing.length > 0) return { ok: false, reason: `no disposition for finding ${missing[0]}` };
+  return { ok: true };
+}
