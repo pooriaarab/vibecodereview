@@ -30,11 +30,19 @@ const SKIP_MARKERS = {
  * fired, which a wrong-but-specific answer would not be.
  */
 export function detectStrength(markdown, mode) {
-  const text = String(markdown || "");
+  // Only a line that BEGINS with the marker counts. The engine always writes it
+  // as its own line; a finding that merely quotes it is reviewer content. That
+  // distinction is load-bearing on this repo in particular, where the council
+  // reviews the very code these strings live in — an unanchored match turned a
+  // real full review with a genuine finding into `trivial`.
+  const lines = String(markdown || "").split("\n");
+  const isSkipLine = (line) => line.trimStart().startsWith(SKIP_PREFIX);
   for (const [strength, marker] of Object.entries(SKIP_MARKERS)) {
-    if (text.includes(marker)) return /** @type {ReviewStrength} */ (strength);
+    if (lines.some((line) => isSkipLine(line) && line.trimStart().startsWith(marker))) {
+      return /** @type {ReviewStrength} */ (strength);
+    }
   }
-  if (text.includes(SKIP_PREFIX)) return "skipped";
+  if (lines.some(isSkipLine)) return "skipped";
   return mode === "delta" ? "delta" : "full";
 }
 
