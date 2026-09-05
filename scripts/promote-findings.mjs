@@ -88,7 +88,7 @@ export function confirmedOccurrencesFromSessions(sessions) {
 /** @param {object[]} hits @param {number} min @param {number} maxDays */
 export function windowQualifies(hits, min, maxDays) {
   if (hits.length < min) return false;
-  const sorted = [...hits].sort((a, b) => a.ts.localeCompare(b.ts));
+  const sorted = hits.toSorted((a, b) => a.ts.localeCompare(b.ts));
   for (let i = 0; i <= sorted.length - min; i += 1) {
     const slice = sorted.slice(i, i + min);
     const span = (Date.parse(slice[slice.length - 1].ts) - Date.parse(slice[0].ts)) / 86400000;
@@ -162,7 +162,9 @@ export function analyzePromotions(occ, opts = {}) {
   const deleteCandidates = [];
   for (const rule of promoted) {
     const hits = hitsForClass(occ, rule.classKey);
-    const last = hits.sort((a, b) => b.ts.localeCompare(a.ts))[0];
+    // toSorted, not sort: hitsForClass may hand back a shared array, and a
+    // delete-candidate scan must not reorder the caller's occurrence list.
+    const last = hits.toSorted((a, b) => b.ts.localeCompare(a.ts))[0];
     const idleDays = last ? (now - Date.parse(last.ts)) / 86400000 : Infinity;
     if (idleDays >= DELETE_IDLE_DAYS) {
       deleteCandidates.push({ ...rule, lastConfirmed: last?.ts || null, idleDays: Math.floor(idleDays) });

@@ -11,6 +11,8 @@ import {
 } from "./promote-findings.mjs";
 import { buildClassKey } from "./file-findings.mjs";
 
+const at = (n) => new Date(Date.now() - n * 86400000).toISOString();
+
 let failed = 0;
 function fail(msg) {
   console.error(`FAIL ${msg}`);
@@ -133,7 +135,6 @@ function occFromSessions(sessions) {
 // PR three times — the shape a future caller or a relaxed dedupe would produce
 // — so the guard is pinned by intent rather than by an upstream accident.
 {
-  const at = (n) => new Date(Date.now() - n * 86400000).toISOString();
   const occ = (pr, days) => ({
     classKey: "K", pr, disposition: "confirmed-open", ts: at(days),
     strength: "full", path: "src/a.ts", lens: "correctness", id: `i${pr}${days}`,
