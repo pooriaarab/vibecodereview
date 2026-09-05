@@ -109,6 +109,20 @@ try {
   else process.env.CORRECTNESS_EFFORT = saved;
 }
 
+// --- a present-but-empty (or whitespace-only) env var is a visible config
+// error, not silently equivalent to the var being unset entirely ---
+try {
+  for (const blank of ["", "   "]) {
+    process.env.CORRECTNESS_EFFORT = blank;
+    const [parsed] = withLensEffort([member]);
+    assert.ok(parsed.effortParseError, `blank ${JSON.stringify(blank)} should surface a parse error`);
+    assert.equal(parsed.effortConfigured, undefined);
+  }
+} finally {
+  if (saved === undefined) delete process.env.CORRECTNESS_EFFORT;
+  else process.env.CORRECTNESS_EFFORT = saved;
+}
+
 // --- an invalid effort must never key the same as unset — a stale cache hit
 // would skip callModel entirely and never surface the parse error ---
 const parseErrorMember = { ...member, effortParseError: "invalid CORRECTNESS_EFFORT: high-ish" };

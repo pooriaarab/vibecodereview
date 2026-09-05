@@ -28,8 +28,12 @@ export function withLensEffort(members) {
   return members.map((member) => {
     const envName = LENS_EFFORT_ENV[member.lens];
     if (!envName) return member;
-    const raw = process.env[envName]?.trim();
-    if (!raw) return member;
+    const value = process.env[envName];
+    if (value === undefined) return member;
+    const raw = value.trim();
+    if (raw === "") {
+      return { ...member, effortParseError: `invalid ${envName}: (empty)` };
+    }
     const position = parseEffortPosition(raw);
     if (position === undefined) {
       return { ...member, effortParseError: `invalid ${envName}: ${raw}` };
