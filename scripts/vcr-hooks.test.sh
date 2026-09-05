@@ -100,6 +100,75 @@ check 'strips a Pi trailer' \
 Co-authored-by: pi <noreply@inflection.ai>' \
   'fix: the thing'
 
+check 'strips the no-model Claude trailer' \
+  'fix: the thing
+
+Co-Authored-By: Claude <noreply@anthropic.com>' \
+  'fix: the thing'
+
+check 'strips another model name' \
+  'fix: the thing
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>' \
+  'fix: the thing'
+
+# The CLI's default attribution block: the footer names the agent too, so
+# stripping only Co-authored-by leaves a commit the standard still fails.
+check 'strips the whole CLI attribution block, footer and trailer' \
+  'fix: the thing
+
+Some body.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>' \
+  'fix: the thing
+
+Some body.'
+
+check 'strips a footer with another model name and no emoji' \
+  'fix: the thing
+
+Generated with Gemini' \
+  'fix: the thing'
+
+# The banned word lives only in the link target; the disclosed agent is not
+# banned, so the standard passes it and the hook must keep it.
+check 'keeps a footer whose banned word is only in the URL' \
+  'fix: the thing
+
+Generated with Zephyr (https://cursor.example/docs)' \
+  'fix: the thing
+
+Generated with Zephyr (https://cursor.example/docs)'
+
+# Assisted-by belongs in the PR body; in a commit its mere presence fails
+# the check, so the hook strips it whatever it names -- Zephyr is not a
+# banned name, which is what proves this is presence-based.
+check 'strips Assisted-by whatever it names' \
+  'fix: the thing
+
+Assisted-by: Zephyr <zephyr@example.com>' \
+  'fix: the thing'
+
+# The standard tests the name with email segments removed, so a human at a
+# banned-domain address passes -- the hook must keep them too.
+check 'keeps a human co-author at a banned-domain address' \
+  'fix: the thing
+
+Co-authored-by: Jane Doe <jane@anthropic.com>' \
+  'fix: the thing
+
+Co-authored-by: Jane Doe <jane@anthropic.com>'
+
+# The spare is the exact name vibecodereview: a banned name beside it is
+# not exempt, and the standard fails it.
+check 'does not spare a banned name smuggled beside vibecodereview' \
+  'fix: the thing
+
+Co-authored-by: Claude vibecodereview <bot@example.com>' \
+  'fix: the thing'
+
 # Wired: the hook directory must come from git-dir, not the working tree, or
 # it can collide with a tracked file and `git add -A` can ship it into the
 # repo it is reviewing -- both near-misses during this PR's development.

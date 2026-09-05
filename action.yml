@@ -140,23 +140,54 @@ runs:
         mkdir -p "$VCR_HOOKS_DIR"
         cat > "$VCR_HOOKS_DIR/prepare-commit-msg" <<'VCR_HOOK_EOF'
         #!/usr/bin/env python3
-        # Drop any Co-authored-by line naming a model or an agent vendor.
+        # Drop attribution lines the fleet's pr-standards check rejects.
         # vibecodereview is spared on purpose: the standard exempts it by name.
         #
-        # Keep this in sync with bannedCommitTrailers in the fleet's
-        # pr-standards config (pooriaarab/scripts, pr-standards.md) -- that
-        # list is the authority and can grow per repo without editing the
-        # checker there, which this static list cannot follow automatically.
+        # Mirror validateCommits in the fleet's pr-standards config
+        # (pooriaarab/scripts, pr-standards.md): it recognizes three line
+        # shapes, so this strips all three with the same semantics. The
+        # name list below cannot follow per-repo additions to
+        # bannedCommitTrailers automatically; that documented gap stays.
         import re, sys
 
         BANNED = r"claude|codex|gemini|kimi|muse|pi|chatgpt|gpt|copilot|cursor|devin|anthropic|openai"
+        # Pictographic planes plus VS16 and ZWJ, the pieces real emoji
+        # footers are built from. The emoji prefix itself is optional.
+        EMOJI = "\u00a9\u00ae\u203c\u2049\u2600-\u27bf\u2b00-\u2bff\ufe0f\u200d\U0001f000-\U0001faff"
+
+
+        def banned(text):
+            return re.search(rf"\b({BANNED})\b", text, re.I)
+
+
+        def disclosed(text):
+            # Test the disclosed agent, not the link beside it: a banned
+            # word in a URL alone must not strip the line.
+            text = re.sub(r"\(https?://[^)]*\)", " ", text)
+            text = re.sub(r"https?://\S+", " ", text)
+            return text.replace("[", " ").replace("]", " ")
+
+
         path = sys.argv[1]
         kept = []
         for line in open(path).read().splitlines(keepends=True):
-            match = re.match(r"\s*co-authored-by:\s*(.*)", line, re.I)
-            named = match and re.search(rf"\b({BANNED})\b", match.group(1), re.I)
-            spared = match and re.search("vibecodereview", match.group(1), re.I)
-            if named and not spared:
+            co = re.match(r"\s*co-authored-by:\s*(.*)", line, re.I)
+            if co:
+                # Test the name with email segments removed: a human at a
+                # banned-domain address must not fail for their email
+                # domain. The spare is the exact name: a banned name
+                # beside it is not exempt.
+                name = re.sub(r"\s+", " ", re.sub(r"<[^>]*>", " ", co.group(1))).strip()
+                if not re.fullmatch(r"vibecodereview", name, re.I) and banned(name):
+                    continue
+                kept.append(line)
+                continue
+            if re.match(r"\s*assisted-by:\s*(.*)", line, re.I):
+                # Assisted-by belongs in the PR body; in a commit its mere
+                # presence fails the check, whatever it names.
+                continue
+            footer = re.match(rf"\s*(?:[{EMOJI}])*\s*generated\s+(?:with|by)\b(.*)", line, re.I)
+            if footer and banned(disclosed(footer.group(1))):
                 continue
             kept.append(line)
         open(path, "w").write("".join(kept))
