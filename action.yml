@@ -998,10 +998,23 @@ runs:
       continue-on-error: true
       env:
         GH_TOKEN: ${{ inputs.github_token }}
+        VCR_MEMBER_DIFF_NOTE: ${{ env.VCR_MEMBER_DIFF_NOTE }}
       run: |
         [ -f council-findings.md ] || { echo "no findings file"; exit 0; }
+        MODE=full
+        case "${VCR_MEMBER_DIFF_NOTE:-}" in
+          delta*) MODE=delta ;;
+        esac
+        STRENGTH=$(MODE="$MODE" node --input-type=module <<'VCR_STRENGTH_EOF'
+        import fs from "node:fs";
+        import { detectStrength } from "${{ github.action_path }}/scripts/vibetrace-records.mjs";
+        const markdown = fs.readFileSync("council-findings.md", "utf8");
+        process.stdout.write(detectStrength(markdown, process.env.MODE));
+        VCR_STRENGTH_EOF
+        )
         node "${{ github.action_path }}/scripts/file-findings.mjs" \
           --findings council-findings.md \
           --repo "${{ github.repository }}" \
           --pr "${{ github.event.pull_request.number }}" \
-          --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+          --strength "$STRENGTH"

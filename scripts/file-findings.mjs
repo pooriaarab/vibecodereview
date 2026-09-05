@@ -217,7 +217,7 @@ export function fileFindings(markdown, { repo, prNumber, runUrl, dryRun = false,
 
 function usage() {
   return `Usage:
-  file-findings.mjs --findings F --repo owner/name --pr N [--run-url U] [--dry-run]`;
+  file-findings.mjs --findings F --repo owner/name --pr N [--run-url U] [--strength S] [--dry-run]`;
 }
 
 export async function main(argv) {
@@ -225,7 +225,7 @@ export async function main(argv) {
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === '--dry-run') { options.dryRun = true; continue; }
-    if (['--findings', '--repo', '--pr', '--run-url'].includes(arg)) {
+    if (['--findings', '--repo', '--pr', '--run-url', '--strength'].includes(arg)) {
       options[arg.slice(2).replace(/-([a-z])/g, (_, c) => c.toUpperCase())] = argv[index + 1];
       index += 1;
       continue;
@@ -252,6 +252,7 @@ export async function main(argv) {
     runUrl: options.runUrl,
     dryRun: options.dryRun,
     headSha: process.env.VCR_REVIEW_HEAD_SHA,
+    strength: options.strength,
   });
   for (const item of result.filed) {
     process.stdout.write(`${item.dryRun ? 'would file' : 'filed'}  ${item.location}  ${item.url || ''}\n`);
