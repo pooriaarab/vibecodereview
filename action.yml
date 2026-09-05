@@ -113,6 +113,18 @@ runs:
         git config user.name "vibecodereview[bot]"
         git config user.email "vibecodereview@users.noreply.github.com"
 
+        # `chair-verdicts.json` is trusted verbatim by the "Emit vibetrace
+        # review.chair" step later, and that step runs `if: always()` --
+        # including when the chair never reaches the point where it writes
+        # that file (a crash, a timeout, or the no-Write-tool OpenRouter
+        # fallback). The checkout above is the PR's own content, so a PR
+        # that simply commits a `chair-verdicts.json` at the repo root would
+        # otherwise have it read back as this run's real verdict, forging
+        # dispositions and poisoning the #129 promotion metric this record
+        # exists to protect. Strip it before anything can read it, so only a
+        # file the chair itself writes later in this run is ever trusted.
+        rm -f chair-verdicts.json
+
         # Strip a model trailer from every commit this run makes.
         #
         # The Claude Code CLI adds `Co-Authored-By: Claude <model> ...` by
@@ -281,7 +293,7 @@ runs:
         # it lives under .git/vcr-hooks, outside the working tree `git add -A`
         # walks.
         printf '%s\n' /pr.diff /pr-delta.diff /council-findings.md /council-carry.md /council-carry.next.md /review-state.md /council.log /council.pid \
-          /probe.1 /probe.2 /probe.3 /reason.1 /reason.2 /reason.3 /council-stats.json \
+          /probe.1 /probe.2 /probe.3 /reason.1 /reason.2 /reason.3 /council-stats.json /chair-verdicts.json \
           >> "$(git rev-parse --git-dir)/info/exclude"
 
         # Keep the chair's evidence complete, but make council member calls
