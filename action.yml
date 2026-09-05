@@ -1005,13 +1005,17 @@ runs:
         case "${VCR_MEMBER_DIFF_NOTE:-}" in
           delta*) MODE=delta ;;
         esac
+        # GitHub's bash shell runs with `set -eo pipefail`, and a failing command
+        # substitution in an assignment aborts the step right there, which would
+        # skip the filing below entirely. `|| STRENGTH=` neutralizes the exit
+        # status so filing still runs and strength is simply omitted.
         STRENGTH=$(MODE="$MODE" node --input-type=module <<'VCR_STRENGTH_EOF'
         import fs from "node:fs";
         import { detectStrength } from "${{ github.action_path }}/scripts/vibetrace-records.mjs";
         const markdown = fs.readFileSync("council-findings.md", "utf8");
         process.stdout.write(detectStrength(markdown, process.env.MODE));
         VCR_STRENGTH_EOF
-        )
+        ) || STRENGTH=
         node "${{ github.action_path }}/scripts/file-findings.mjs" \
           --findings council-findings.md \
           --repo "${{ github.repository }}" \
