@@ -425,8 +425,8 @@ runs:
 
         LOOP GUARD: if "Can push fixes" is false, DO NOT push any commits — leave a review comment only. If a prior cycle already tried to fix an issue and it persists, stop fixing it and flag it for a human instead of pushing again.
 
-        Council members each reviewed this PR through one lens (correctness, performance,
-        security, maintainability) and wrote findings to `council-findings.md`. You are the
+        Council members each reviewed this PR through one lens and wrote findings to
+        `council-findings.md`, under a heading per member that names its lens. You are the
         synthesizer and the ONLY member who can push fixes.
 
         1. Read the diff. It is ALREADY on disk at `pr.diff` — `cat pr.diff`. Do not spend a
