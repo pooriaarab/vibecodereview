@@ -749,6 +749,22 @@ runs:
         prompt: ${{ steps.prompt.outputs.text }}
         claude_args: '--allowed-tools "Bash(gh api:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr review:*),Bash(gh pr comment:*),Bash(git:*),Bash(jq:*),Bash(cat:*),Bash(ls:*),Bash(head:*),Bash(wc:*),Read,Glob,Grep,Edit,Write,TodoWrite"'
 
+    # A chair attempt writes chair-verdicts.json BEFORE it posts (step 6c
+    # precedes step 7 in the prompt), so an attempt that crashes or times out
+    # in between can leave that file behind despite never posting a review.
+    # Nothing else clears it, and the final emit step trusts whatever file is
+    # on disk when it runs -- so without this, a stale verdict from a chair
+    # that never posted gets misattributed to whichever later attempt (down
+    # to the no-Write OpenRouter fallback) actually posts the real review.
+    # One cleanup precedes each attempt below, gated on the same condition
+    # that already decides whether that attempt runs, so a still-running
+    # earlier success (which skips every later attempt) is never touched.
+    - name: Clear stale chair-verdicts.json before backup attempt
+      if: steps.budget.outputs.over != 'true' && steps.chair_primary.outcome != 'success'
+      continue-on-error: true
+      shell: bash
+      run: rm -f chair-verdicts.json
+
     - name: Chair review (backup token)
       id: chair_backup
       if: steps.budget.outputs.over != 'true' && steps.chair_primary.outcome != 'success' && steps.chair_probe.outputs.token_2 != 'dead' && inputs.claude_code_oauth_token_2 != ''
@@ -760,6 +776,12 @@ runs:
         allowed_bots: "*"
         prompt: ${{ steps.prompt.outputs.text }}
         claude_args: '--allowed-tools "Bash(gh api:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr review:*),Bash(gh pr comment:*),Bash(git:*),Bash(jq:*),Bash(cat:*),Bash(ls:*),Bash(head:*),Bash(wc:*),Read,Glob,Grep,Edit,Write,TodoWrite"'
+
+    - name: Clear stale chair-verdicts.json before third attempt
+      if: steps.budget.outputs.over != 'true' && steps.chair_primary.outcome != 'success' && steps.chair_backup.outcome != 'success'
+      continue-on-error: true
+      shell: bash
+      run: rm -f chair-verdicts.json
 
     - name: Chair review (third token)
       id: chair_third
@@ -773,6 +795,12 @@ runs:
         prompt: ${{ steps.prompt.outputs.text }}
         claude_args: '--allowed-tools "Bash(gh api:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr review:*),Bash(gh pr comment:*),Bash(git:*),Bash(jq:*),Bash(cat:*),Bash(ls:*),Bash(head:*),Bash(wc:*),Read,Glob,Grep,Edit,Write,TodoWrite"'
 
+    - name: Clear stale chair-verdicts.json before fourth attempt
+      if: steps.budget.outputs.over != 'true' && steps.chair_primary.outcome != 'success' && steps.chair_backup.outcome != 'success' && steps.chair_third.outcome != 'success'
+      continue-on-error: true
+      shell: bash
+      run: rm -f chair-verdicts.json
+
     - name: Chair review (fourth token)
       id: chair_fourth
       if: steps.budget.outputs.over != 'true' && steps.chair_primary.outcome != 'success' && steps.chair_backup.outcome != 'success' && steps.chair_third.outcome != 'success' && steps.chair_probe.outputs.token_4 != 'dead' && inputs.claude_code_oauth_token_4 != ''
@@ -784,6 +812,23 @@ runs:
         allowed_bots: "*"
         prompt: ${{ steps.prompt.outputs.text }}
         claude_args: '--allowed-tools "Bash(gh api:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr review:*),Bash(gh pr comment:*),Bash(git:*),Bash(jq:*),Bash(cat:*),Bash(ls:*),Bash(head:*),Bash(wc:*),Read,Glob,Grep,Edit,Write,TodoWrite"'
+
+    # This one matters most: the fallback has no Write tool (it is a single
+    # completion call, not an agentic loop), so it can never overwrite a
+    # stale file itself. Without this cleanup, a stale verdict left by a
+    # crashed full-tool attempt would ride along into the emit step and be
+    # reported as the verdict behind the fallback's own, differently-reasoned
+    # review.
+    - name: Clear stale chair-verdicts.json before fallback
+      if: >-
+        steps.budget.outputs.over != 'true' &&
+        steps.chair_primary.outcome != 'success' &&
+        steps.chair_backup.outcome != 'success' &&
+        steps.chair_third.outcome != 'success' &&
+        steps.chair_fourth.outcome != 'success'
+      continue-on-error: true
+      shell: bash
+      run: rm -f chair-verdicts.json
 
     # Surface the true result: green if any chair run succeeded; red if they all
     # failed. Without this, continue-on-error would mask a genuine failure as
