@@ -47,8 +47,12 @@ size, line count, or file count. Each lens reviews only the kinds it can speak t
 | maintainability | source, test, CI, agent instructions |
 | performance | source, style (CSS/SCSS/Less/Sass) |
 
-A lockfile-only push keeps scope, correctness, and security; it skips performance and
-maintainability. A docs-only delta keeps scope alone. An unparseable diff fails open and
+A lockfile-only or docs-only push never reaches routing at all: the trivial-delta check
+above already skips the whole council, scope included, before any lens is dispatched.
+Routing only decides the roster once a delta has at least one non-inert path — a
+dependency-manifest-only push (`package.json`, `go.mod`, ...) keeps scope, correctness,
+and security; a test-only push keeps scope, correctness, and maintainability; a
+style-only push keeps scope and performance. An unparseable diff fails open and
 dispatches every lens. Dropped lenses are listed in the findings as "Lenses not dispatched".
 
 Set `VCR_LENS_ROUTING=off` to disable routing and dispatch the full roster.
