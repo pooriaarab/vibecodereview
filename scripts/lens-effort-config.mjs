@@ -20,7 +20,13 @@ export function effortCacheSegment(model) {
   // check (which surfaces the typo) would never run.
   if (model.effortParseError) return `error:${model.effortParseError}`;
   if (!model.effortConfigured || model.effortPosition === undefined) return "";
-  return String(model.effortPosition);
+  // Key on the RESOLVED rung, not the raw position. A published ladder can be
+  // edited (a rung added/removed) without the position changing, and that
+  // alone can move the same position onto a different rung — keying on the
+  // position alone would keep returning the completion resolved under the
+  // old ladder.
+  const rung = resolveMemberRung(model);
+  return rung ? `rung:${rung}` : `pos:${model.effortPosition}`;
 }
 
 /** @param {Array<{ lens: string } & Record<string, unknown>>} members */
