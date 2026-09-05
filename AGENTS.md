@@ -33,10 +33,11 @@ Read `.agents/brand.md` and `.agents/design.md` before public copy or interface 
 
 - Zero runtime deps. Node ≥20, global `fetch` only. Do not add npm dependencies.
 - Providers: `openai`, `gemini`, `moonshot`, `openrouter`, `custom`, `claude`,
-  `claude2`. The last two are subscription-backed: they shell the Claude Code
-  CLI rather than POSTing, and add no npm dependency. Add one by extending
-  `PROVIDERS` in `council-config.mjs` (+ `DEFAULT_MODELS` if it should be on by
-  default).
+  `claude2`, `claude3`, `claude4`. The `claude*` seats are subscription-backed:
+  they shell the Claude Code CLI rather than POSTing, and add no npm
+  dependency. OpenRouter must never carry a Claude, Codex, or Grok model
+  id — the engine skips those before the HTTP call. Add a seat by setting
+  `CLAUDE_CODE_OAUTH_TOKEN_N` (provider `claudeN`).
 - A member with no API key must skip with a note, never throw.
 - The council uses a scope lens to verify atomicity and claim alignment. Set `PR_CONTEXT_FILE` to a file containing the author's claim (title, body, closed issues) to feed this lens.
 - A composite action's `inputs:` block must contain NO `${{ }}` expressions — not in a default AND not in a description string; GitHub parses them and fails at 'Set up job'. Callers pass github_token explicitly.

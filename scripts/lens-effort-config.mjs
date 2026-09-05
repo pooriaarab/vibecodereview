@@ -67,7 +67,7 @@ export function effortWireExtras(model) {
 
 /** @param {{ provider: string, model: string, effortConfigured?: boolean, effortPosition?: number }} model */
 export function cliEffortRung(model) {
-  if (model.provider !== "claude" && model.provider !== "claude2") return undefined;
+  if (!/^claude\d*$/.test(String(model.provider || ""))) return undefined;
   if (!publishedLadder(model)) return undefined;
   return resolveMemberRung(model);
 }

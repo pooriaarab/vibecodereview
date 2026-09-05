@@ -12,6 +12,7 @@ import {
 } from "./council-config.mjs";
 import { callClaudeCli } from "./claude-cli-seat.mjs";
 import { cliEffortRung, effortWireExtras } from "./lens-effort-config.mjs";
+import { bannedOpenRouterReason, usesOpenRouterRoute } from "./openrouter-policy.mjs";
 
 // Members run in parallel, so the council costs max(member latency), not the
 // sum — the timeout is therefore a direct tail-latency tax on every run. In
@@ -86,6 +87,12 @@ export async function callModel(model, diff) {
         effortRung: cliEffortRung(model),
       }),
     );
+  }
+  // Refuse before the key check so a banned roster is visible even
+  // without OPENROUTER_API_KEY, and so we never POST a Claude/Codex id.
+  if (usesOpenRouterRoute(model, provider)) {
+    const why = bannedOpenRouterReason(model.model);
+    if (why) return timed({ model, error: `skipped: ${why}` });
   }
   if (provider && !provider.url) return timed({ model, error: "skipped: CUSTOM_BASE_URL not set" });
   const apiKey = provider && process.env[provider.keyEnv]?.trim();

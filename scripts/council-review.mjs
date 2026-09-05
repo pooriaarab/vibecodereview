@@ -238,7 +238,7 @@ async function main() {
   const models = parseModels();
   if (models.length === 0) {
     write(
-      "# 🧑‍⚖️ LLM Council findings\n\n_Council skipped: COUNCIL_MODELS parsed to no valid members (expected `provider|model|Name|lens`; providers: openai, gemini, moonshot, openrouter, custom)._\n",
+      "# 🧑‍⚖️ LLM Council findings\n\n_Council skipped: COUNCIL_MODELS parsed to no valid members (expected `provider|model|Name|lens`; providers: openai, gemini, moonshot, openrouter, custom, claude, claude2, claude3, claude4)._\n",
     );
     console.log("No valid council members — skipped.");
     return;

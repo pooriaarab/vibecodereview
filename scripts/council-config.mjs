@@ -1,3 +1,5 @@
+import { bannedOpenRouterReason, isClaudeSeatProvider } from "./openrouter-policy.mjs";
+
 // The council's configuration: which providers exist, which lens each member
 // reviews through, and where to reroute a member whose native key is dead.
 // This is data, and keeping it beside the engine pushed council-review.mjs past
@@ -22,11 +24,20 @@ export const PROVIDERS = {
   // the Claude Code CLI the action already installs for the chair. The cost
   // lands on the Claude subscription instead of a metered API key, which is the
   // whole point: the metered keys are what keep running dry.
-  // `claude2` exists so a second subscription can hold its own seat rather than
-  // idling as the chair's failover token.
+  // Numbered seats (claude2+) so extra subscriptions hold a real council
+  // seat instead of only idling as the chair's failover. Claude never
+  // goes through OpenRouter — see openrouter-policy.mjs.
   claude: { cli: true, keyEnv: "CLAUDE_CODE_OAUTH_TOKEN" },
   claude2: { cli: true, keyEnv: "CLAUDE_CODE_OAUTH_TOKEN_2" },
+  claude3: { cli: true, keyEnv: "CLAUDE_CODE_OAUTH_TOKEN_3" },
+  claude4: { cli: true, keyEnv: "CLAUDE_CODE_OAUTH_TOKEN_4" },
 };
+
+// CLAUDE_CODE_OAUTH_TOKEN_5+ become provider claude5+ without another edit.
+for (const key of Object.keys(process.env)) {
+  const n = /^CLAUDE_CODE_OAUTH_TOKEN_(\d+)$/.exec(key)?.[1];
+  if (n && Number(n) > 4) PROVIDERS[`claude${n}`] = { cli: true, keyEnv: key };
+}
 
 // Diverse lenses so each model catches what the others miss.
 export const LENSES = {
@@ -61,10 +72,11 @@ export const LENSES = {
 // single funded key can carry every lens. Map each native model to its
 // OpenRouter id and retry there when the native call fails on auth or quota.
 export const OPENROUTER_EQUIVALENT = {
-  "gpt-5.6": "openai/gpt-5.6",
-  "gpt-5.6-terra-pro": "openai/gpt-5.6-terra-pro",
-  "gemini-3.1-pro-preview": "google/gemini-3.1-pro-preview",
-  "kimi-k3": "moonshotai/kimi-k3",
+  // Native key dead → cheap leftover, never a metered copy of a subscription.
+  "gpt-5.6": "deepseek/deepseek-v4-flash",
+  "gpt-5.6-terra-pro": "deepseek/deepseek-v4-flash",
+  "gemini-3.1-pro-preview": "z-ai/glm-5.3-flash",
+  "kimi-k3": "z-ai/glm-5.3-flash",
 };
 
 // Statuses that mean "this key will not work today", as opposed to a transient
@@ -74,9 +86,11 @@ export const CREDENTIAL_FAILURE_STATUSES = [401, 402, 403, 429];
 
 export function openRouterFallbackFor(model) {
   if (model.provider === "openrouter") return null;
+  // A Claude OAuth seat has nowhere to go on OpenRouter: that route is banned.
+  if (isClaudeSeatProvider(model.provider)) return null;
   if (!process.env.OPENROUTER_API_KEY?.trim()) return null;
   const mapped = OPENROUTER_EQUIVALENT[model.model] || (model.model.includes("/") ? model.model : null);
-  if (!mapped) return null;
+  if (!mapped || bannedOpenRouterReason(mapped)) return null;
   return { ...model, provider: "openrouter", model: mapped };
 }
 
@@ -84,13 +98,12 @@ export const DEFAULT_MODELS = [
   { provider: "openai", model: process.env.OPENAI_MODEL || "gpt-5.6", name: "GPT-5.6 (Codex)", lens: "correctness" },
   { provider: "gemini", model: process.env.GEMINI_MODEL || "gemini-3.1-pro-preview", name: "Gemini 3 Pro", lens: "performance" },
   { provider: "moonshot", model: process.env.MOONSHOT_MODEL || "kimi-k3", name: "Kimi K3", lens: "security" },
-  { provider: "openrouter", model: process.env.OPENROUTER_MODEL || "x-ai/grok-4.5", name: "Grok 4.5", lens: "maintainability" },
-  // Scope rides OpenRouter, not the native OpenAI key that `correctness`
-  // already uses. Two lenses behind one key means one `insufficient_quota`
-  // takes out both, and on 2026-08-27 that key was 429-ing on 47 of the 48
-  // repos running this action. Its own SCOPE_MODEL override keeps a change
-  // here from silently re-pointing the correctness member too.
-  { provider: "openrouter", model: process.env.SCOPE_MODEL || "openai/gpt-5.6", name: "GPT-5.6 (scope)", lens: "scope" },
+  { provider: "openrouter", model: process.env.OPENROUTER_MODEL || "deepseek/deepseek-v4-flash", name: "DeepSeek V4 Flash", lens: "maintainability" },
+  // Scope rides a cheap OpenRouter model, not the native OpenAI key that
+  // `correctness` already uses. Two lenses behind one key means one
+  // `insufficient_quota` takes out both. GPT-5.6 and Grok are banned on
+  // this route — they have their own subscriptions.
+  { provider: "openrouter", model: process.env.SCOPE_MODEL || "z-ai/glm-5.3-flash", name: "GLM 5.3 Flash (scope)", lens: "scope" },
 ];
 
 // Test files whose ADDED lines make a mutation review worth paying for. The
@@ -147,15 +160,14 @@ export function diffAddsTestLines(diff) {
 // once it applies what it proposes. It ships off so that turning it on is a
 // decision somebody made rather than a cost that arrived.
 //
-// It rides OpenRouter with its own model override for the same reason SCOPE_MODEL
-// exists: so setting it cannot silently repoint another lens's model. It does NOT
-// give quota isolation -- mutation shares OPENROUTER_API_KEY with the scope and
-// maintainability members, so an exhausted key still takes out all three.
+// Claude via an OAuth seat, never OpenRouter. MUTATION_PROVIDER picks which
+// token (claude / claude2 / claude3 / claude4); MUTATION_MODEL is the CLI
+// model name so it cannot silently repoint another lens.
 export function mutationMember() {
   if (String(process.env.MUTATION_LENS || "").trim().toLowerCase() !== "true") return null;
   return {
-    provider: "openrouter",
-    model: process.env.MUTATION_MODEL || "anthropic/claude-sonnet-5",
+    provider: process.env.MUTATION_PROVIDER?.trim() || "claude",
+    model: process.env.MUTATION_MODEL?.trim() || "claude-sonnet-5",
     name: "Claude Sonnet 5 (mutation)",
     lens: "mutation",
   };

@@ -166,7 +166,7 @@ assert.notEqual(cacheKey(diff, parseErrorMember), cacheKey(diff, member));
     assert.ok(mutation, "mutation member should be appended for a diff that adds tests");
     assert.equal(mutation.effortConfigured, true, "MUTATION_EFFORT must reach the appended mutation member");
     assert.equal(mutation.effortPosition, 1);
-    assert.ok(effortWireExtras(mutation), "a configured mutation member must carry effort onto the wire");
+    assert.equal(cliEffortRung(mutation), "max", "MUTATION_EFFORT must reach the Claude CLI seat");
   } finally {
     if (savedLens === undefined) delete process.env.MUTATION_LENS; else process.env.MUTATION_LENS = savedLens;
     if (savedEffort === undefined) delete process.env.MUTATION_EFFORT; else process.env.MUTATION_EFFORT = savedEffort;

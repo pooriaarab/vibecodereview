@@ -9,7 +9,9 @@ export function claudeCliArgs(model, instructions, effortRung) {
     "-p",
     instructions,
     "--model",
-    model.model,
+    // Strip an anthropic/ prefix so a leftover OpenRouter id still
+    // reaches the CLI as the model name it actually accepts.
+    String(model.model || "").replace(/^anthropic\//, ""),
     // No tools: the seat needs nothing but the diff on stdin. This also
     // keeps an agentic loop from eating the timeout.
     "--allowed-tools",
@@ -37,14 +39,20 @@ export async function callClaudeCli(model, diff, oauthToken, { instructions, tim
   // read its env, but the seat never needs these values to do its job — don't
   // leave them reachable as a second line of defense against a bypass in either
   // of those controls.
-  const env = { ...process.env, CLAUDE_CODE_OAUTH_TOKEN: oauthToken };
+  const env = { ...process.env };
+  // A seat must only ever hold its own token. Drop every OAuth slot
+  // (unnumbered plus _2, _3, _4, …) before putting this seat's token
+  // in the name the CLI actually reads.
+  for (const k of Object.keys(env)) {
+    if (k === "CLAUDE_CODE_OAUTH_TOKEN" || k.startsWith("CLAUDE_CODE_OAUTH_TOKEN_")) delete env[k];
+  }
+  env.CLAUDE_CODE_OAUTH_TOKEN = oauthToken;
   for (const k of [
     "ANTHROPIC_API_KEY",
     "ANTHROPIC_AUTH_TOKEN",
     "ANTHROPIC_BASE_URL",
     "CLAUDE_CODE_USE_BEDROCK",
     "CLAUDE_CODE_USE_VERTEX",
-    "CLAUDE_CODE_OAUTH_TOKEN_2", // a seat must only ever hold its own token
     "GH_TOKEN",
     "OPENAI_API_KEY",
     "GEMINI_API_KEY",

@@ -30,14 +30,14 @@ inputs:
     description: "Moonshot/Kimi key — security lens. Omit to drop it."
     required: false
   openrouter_api_key:
-    description: "OpenRouter key — Grok/DeepSeek member (maintainability lens). Omit to drop it."
+    description: "OpenRouter key — cheap leftover members (DeepSeek/GLM). Not Claude, Codex, or Grok. Omit to drop it."
     required: false
   chair_fallback_model:
-    description: "Model for the OpenRouter fallback chair, used only when every Claude OAuth token fails. Defaults to anthropic/claude-sonnet-5 — the same model the primary chair runs — so the fallback review reads like the real one. Set empty-string behaviour by omitting; omit openrouter_api_key to disable the fallback entirely."
+    description: "Model for the OpenRouter fallback chair, used only when every Claude OAuth token fails. Must be a cheap leftover id (default deepseek/deepseek-v4-flash). Claude, Codex, and Grok ids are refused before the HTTP call. Omit openrouter_api_key to disable the fallback entirely."
     required: false
-    default: "anthropic/claude-sonnet-5"
+    default: "deepseek/deepseek-v4-flash"
   council_models:
-    description: "Optional CSV override: provider|model|Name|lens,... (providers: openai, gemini, moonshot, openrouter, custom, claude, claude2). `claude`/`claude2` are subscription-backed seats that shell the Claude Code CLI using claude_code_oauth_token / _2 instead of a metered API key."
+    description: "Optional CSV override: provider|model|Name|lens,... (providers: openai, gemini, moonshot, openrouter, custom, claude, claude2, claude3, claude4). Claude seats shell the Claude Code CLI using the matching claude_code_oauth_token. OpenRouter must not name a Claude, Codex, or Grok model."
     required: false
   can_push_fixes:
     description: "If true, the chair may commit and push fixes to the PR branch."
@@ -72,7 +72,7 @@ inputs:
     required: false
     default: "false"
   mutation_model:
-    description: "Model for the mutation member, over OpenRouter. Its own env var keeps it from silently repointing the scope or maintainability lens, which ride the same OpenRouter route. It still shares openrouter_api_key with those lenses, so a quota failure on that key still takes out all three."
+    description: "Claude CLI model for the mutation member (default claude-sonnet-5). Runs on a Claude OAuth seat, never OpenRouter. Set MUTATION_PROVIDER to claude2/claude3/claude4 to pick a different token."
     required: false
     default: ""
   lens_path_filter:
@@ -255,9 +255,11 @@ runs:
         GEMINI_API_KEY: ${{ inputs.gemini_api_key }}
         MOONSHOT_API_KEY: ${{ inputs.moonshot_api_key }}
         OPENROUTER_API_KEY: ${{ inputs.openrouter_api_key }}
-        # Subscription-backed council seats (provider `claude` / `claude2`).
+        # Subscription-backed council seats (provider `claude` / `claude2` / `claude3` / `claude4`).
         CLAUDE_CODE_OAUTH_TOKEN: ${{ inputs.claude_code_oauth_token }}
         CLAUDE_CODE_OAUTH_TOKEN_2: ${{ inputs.claude_code_oauth_token_2 }}
+        CLAUDE_CODE_OAUTH_TOKEN_3: ${{ inputs.claude_code_oauth_token_3 }}
+        CLAUDE_CODE_OAUTH_TOKEN_4: ${{ inputs.claude_code_oauth_token_4 }}
         COUNCIL_MODELS: ${{ inputs.council_models }}
         COUNCIL_TIMEOUT_MS: ${{ inputs.council_timeout_ms }}
         MUTATION_LENS: ${{ inputs.mutation_lens }}
