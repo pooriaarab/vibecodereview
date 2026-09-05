@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   REVIEW_STATE_MARKER,
   buildReviewState,
+  countAddedLines,
   diffPaths,
   lensCanReviewDiff,
   parseReviewState,
@@ -59,5 +60,13 @@ assert.deepEqual(parseReviewState(wrappedState), {
 });
 assert.equal(parseReviewState(state.replace("carry:", "broken:")), null);
 assert.equal(parseReviewState("not a state comment"), null);
+
+assert.equal(countAddedLines(sourceDiff), 1);
+// A real added line whose content itself starts with `++` renders as
+// `+++counter;` (no space), which must still count as content, not be
+// mistaken for a `+++ b/path` file header.
+const plusPlusDiff = "diff --git a/src/x.ts b/src/x.ts\n--- a/src/x.ts\n+++ b/src/x.ts\n+++counter;\n+return true;\n";
+assert.equal(countAddedLines(plusPlusDiff), 2);
+assert.equal(countAddedLines(""), 0);
 
 console.log("review delta tests passed");

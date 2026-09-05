@@ -686,7 +686,8 @@ runs:
           CANCELLED=1
         fi
         node "${{ github.action_path }}/scripts/vibetrace-emit.mjs" review.council \
-          --mode "$MODE" --cache-hit "$CACHE_HIT" --members "$MEMBERS" --cancelled "$CANCELLED"
+          --mode "$MODE" --cache-hit "$CACHE_HIT" --members "$MEMBERS" --cancelled "$CANCELLED" \
+          --findings council-findings.md --diff pr-delta.diff
 
     # Failover chain: each attempt runs the SAME prompt (built once above) with
     # a different subscription. Every attempt costs ~10s of setup even when the

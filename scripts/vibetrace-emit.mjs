@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 // Silent-fail vibetrace emitter for council runs. Matches @vibetrace/schema
-// review.council shape. Never throws; never blocks the review check.
+// the review.council shape. Never throws; never blocks the review check.
 //
 // Usage:
 //   node vibetrace-emit.mjs review.council \
-//     --mode delta|full --cache-hit 0|1 --members N --cancelled 0|1
+//     --mode delta|full --cache-hit 0|1 --members N --cancelled 0|1 \
+//     [--findings council-findings.md] [--diff pr-delta.diff]
 //
 // Env (all optional): VIBETRACE_INGEST_URL, VIBETRACE_INGEST_TOKEN, VIBETRACE_FILE,
 // GITHUB_REPOSITORY, VCR_PR / GITHUB_PR_NUMBER, GITHUB_HEAD_REF,
@@ -12,13 +13,21 @@
 
 import fs from "node:fs";
 import path from "node:path";
-
-const SCHEMA_VERSION = "0.1.0";
+import { buildCouncilRecord } from "./vibetrace-records.mjs";
 
 function arg(name, fallback = undefined) {
   const i = process.argv.indexOf(name);
   if (i === -1 || i + 1 >= process.argv.length) return fallback;
   return process.argv[i + 1];
+}
+
+function readOptional(file) {
+  if (!file || !fs.existsSync(file)) return "";
+  try {
+    return fs.readFileSync(file, "utf8");
+  } catch {
+    return "";
+  }
 }
 
 function parseIssueFromBranch(branch) {
@@ -60,30 +69,24 @@ function attribution() {
   return out;
 }
 
-function buildCouncilRecord() {
-  const mode = arg("--mode", "full");
-  if (mode !== "full" && mode !== "delta") {
-    return { ok: false, reason: "mode must be full or delta" };
-  }
-  const cacheHit = arg("--cache-hit", "0") === "1";
-  const cancelled = arg("--cancelled", "0") === "1";
-  const memberCount = Number(arg("--members", "0"));
-  if (!Number.isInteger(memberCount) || memberCount < 0) {
-    return { ok: false, reason: "members must be a non-negative integer" };
-  }
-  return {
-    ok: true,
-    record: {
-      schemaVersion: SCHEMA_VERSION,
-      ts: new Date().toISOString(),
-      type: "review.council",
+function buildRecord(kind) {
+  const attr = attribution();
+  if (kind === "review.council") {
+    const mode = arg("--mode", "full");
+    const cacheHit = arg("--cache-hit", "0") === "1";
+    const cancelled = arg("--cancelled", "0") === "1";
+    const memberCount = Number(arg("--members", "0"));
+    return buildCouncilRecord({
       mode,
       cacheHit,
       memberCount,
       cancelled,
-      attribution: attribution(),
-    },
-  };
+      attribution: attr,
+      findingsMarkdown: readOptional(arg("--findings")),
+      diffMarkdown: readOptional(arg("--diff")),
+    });
+  }
+  return { ok: false, reason: `unsupported type; only review.council` };
 }
 
 async function emit(record) {
@@ -129,18 +132,18 @@ async function emit(record) {
 async function main() {
   try {
     const kind = process.argv[2];
-    if (kind !== "review.council") {
-      console.error("vibetrace-emit: unsupported type; only review.council");
+    if (!kind) {
+      console.error("vibetrace-emit: missing record type");
       process.exit(0);
     }
-    const built = buildCouncilRecord();
+    const built = buildRecord(kind);
     if (!built.ok) {
       console.error(`vibetrace-emit: ${built.reason}`);
       process.exit(0);
     }
     const where = await emit(built.record);
     if (where) {
-      console.log(`vibetrace-emit: wrote review.council -> ${where}`);
+      console.log(`vibetrace-emit: wrote ${kind} -> ${where}`);
     }
   } catch (err) {
     // Fetch failures are sanitized inside emit(), so anything reaching here

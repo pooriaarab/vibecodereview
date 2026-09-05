@@ -21,6 +21,22 @@ function patternsForLens(pathFilter, lens) {
   return Array.isArray(patterns) ? patterns.filter((pattern) => typeof pattern === "string") : [];
 }
 
+// A real header is always "+++ b/path" or "--- a/path" (space-separated,
+// a/ b/ or /dev/null). An added content line like `++counter;` renders as
+// `+++counter;` with no space, so a bare `startsWith("+++")` would wrongly
+// treat it as a header and undercount.
+const DIFF_HEADER = /^(?:--- (?:a\/|\/dev\/null)|\+\+\+ (?:b\/|\/dev\/null))/;
+
+/** Count `+` lines in a unified diff (denominator for finding recurrence). */
+export function countAddedLines(diff) {
+  let count = 0;
+  for (const line of String(diff || "").split("\n")) {
+    if (DIFF_HEADER.test(line)) continue;
+    if (line.startsWith("+")) count += 1;
+  }
+  return count;
+}
+
 export function diffPaths(diff) {
   const paths = [];
   for (const line of String(diff || "").split("\n")) {
