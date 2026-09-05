@@ -40,7 +40,7 @@ import {
   diffAddsTestLines,
   selfcheckMutationRoster,
 } from "./council-config.mjs";
-import { buildFindingsMarkdown, lensCanReviewDiff } from "./review-delta.mjs";
+import { buildFindingsMarkdown, councilRunStats, lensCanReviewDiff } from "./review-delta.mjs";
 import {
   REQUEST_TIMEOUT_MS,
   parseModels,
@@ -52,6 +52,19 @@ import { cacheKey, loadCouncilResults, saveCouncilResult } from "./council-cache
 import { behavioralSurface } from "./behavioral-surface.mjs";
 import { filterMembersByKindRouting, lensesForKinds, routeLenses } from "./lens-routing.mjs";
 import { appendFindingsMeta } from "./file-findings.mjs";
+
+// Council run stats for the telemetry record: how many members THIS run
+// dispatched and whether any returned from cache. Written to VCR_STATS_FILE
+// (when set) so the emitter never recovers these numbers by parsing the
+// report, whose carried-forward section reuses old member headings. A stats
+// write failure is silent: telemetry must never turn a green run red.
+function writeRunStats(stats) {
+  const statsFile = process.env.VCR_STATS_FILE;
+  if (!statsFile) return;
+  try {
+    fs.writeFileSync(statsFile, JSON.stringify(stats));
+  } catch {}
+}
 
 async function main() {
   if (process.argv.includes("--selfcheck")) {
@@ -215,9 +228,10 @@ async function main() {
   // The ONLY way to write the report. It appends the findings metadata the
   // trace records read, and preserves the carry alongside the report, so a
   // future early return that uses `write` can forget neither.
-  const write = (md, carry = priorFindings) => {
+  const write = (md, carry = priorFindings, stats = { memberCount: 0, cacheHit: false }) => {
     fs.writeFileSync(outFile, appendFindingsMeta(md));
     if (process.env.VCR_CARRY_FILE) fs.writeFileSync(process.env.VCR_CARRY_FILE, carry);
+    writeRunStats(stats);
   };
 
   const models = parseModels();
@@ -347,7 +361,7 @@ async function main() {
   if (combined.length > CARRY_CHAR_BUDGET) {
     combined = combined.slice(0, CARRY_CHAR_BUDGET) + "\n\n_[older carried findings dropped to keep the review-state comment under GitHub's size limit]_";
   }
-  write(report, combined);
+  write(report, combined, councilRunStats(results));
   console.log(`Wrote ${outFile}`);
 }
 
@@ -360,5 +374,6 @@ main().catch((err) => {
       appendFindingsMeta(`# 🧑‍⚖️ LLM Council findings\n\n_Council errored: ${String(err?.message || err)}_\n`),
     );
   } catch {}
+  writeRunStats({ memberCount: 0, cacheHit: false });
   process.exit(0);
 });
