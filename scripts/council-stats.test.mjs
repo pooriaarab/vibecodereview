@@ -17,6 +17,21 @@ import { councilRunStats } from "./review-delta.mjs";
 const scriptsDir = path.dirname(fileURLToPath(import.meta.url));
 const engine = path.join(scriptsDir, "council-review.mjs");
 const emit = path.join(scriptsDir, "vibetrace-emit.mjs");
+const statsReader = path.join(scriptsDir, "read-council-stats.mjs");
+
+// The exact read action.yml's emit step performs: run the extracted reader
+// script against a stats sidecar and split its "<members> <cacheHit>" line.
+// Driving this instead of hardcoding the expected numbers means a regression
+// in read-council-stats.mjs itself -- the code action.yml actually runs --
+// fails this test, not just a copy of its logic.
+function readStatsViaAction(statsFile) {
+  const out = spawnSync(process.execPath, [statsReader], {
+    env: { VCR_STATS_FILE: statsFile },
+    encoding: "utf8",
+  });
+  const [members, cacheHit] = out.stdout.trim().split(" ");
+  return { members, cacheHit };
+}
 
 const CODE_DIFF = "diff --git a/src/app.ts b/src/app.ts\n--- a/src/app.ts\n+++ b/src/app.ts\n+const x = 1;\n";
 // Three carried member headings, one of them `(cached)`: under the old
@@ -93,6 +108,9 @@ function readStats(statsFile) {
   const report = fs.readFileSync(run.outFile, "utf8");
   assert.ok(report.includes("M1 — correctness lens"), "dispatched headings must stay in the report");
   assert.ok(!report.includes("(cached)"), "uncached run must not mark headings cached");
+  const { members, cacheHit } = readStatsViaAction(run.statsFile);
+  assert.equal(members, "2", `reader script must derive 2 members: ${members}`);
+  assert.equal(cacheHit, "0", `reader script must derive no cache hit: ${cacheHit}`);
   console.log("ok    two dispatched members -> memberCount 2, cacheHit false");
 }
 
@@ -115,16 +133,19 @@ function readStats(statsFile) {
   console.log("ok    councilRunStats counts results and hits cache only on cached results");
 }
 
-// The record built from the zero-member sidecar (the values the emit step
-// passes as --members/--cache-hit) carries 0/false even though the findings
-// file is full of carried member headings.
+// The record built from the zero-member sidecar (the values action.yml's
+// reader script derives, then passes as --members/--cache-hit) carries
+// 0/false even though the findings file is full of carried member headings.
 {
-  const { result, work, diffFile, outFile } = runEngine(CODE_DIFF, CARRIED);
+  const { result, work, diffFile, outFile, statsFile } = runEngine(CODE_DIFF, CARRIED);
   assert.equal(result.status, 0, `engine exited ${result.status}: ${result.stderr}`);
+  const { members, cacheHit } = readStatsViaAction(statsFile);
+  assert.equal(members, "0", `reader script must derive 0 members: ${members}`);
+  assert.equal(cacheHit, "0", `reader script must derive no cache hit: ${cacheHit}`);
   const traces = path.join(work, "traces.jsonl");
   const emitted = spawnSync(
     process.execPath,
-    [emit, "review.council", "--mode", "full", "--cache-hit", "0", "--members", "0",
+    [emit, "review.council", "--mode", "full", "--cache-hit", cacheHit, "--members", members,
       "--cancelled", "0", "--findings", outFile, "--diff", diffFile],
     { env: { ...process.env, VIBETRACE_FILE: traces, VIBETRACE_INGEST_URL: "" }, encoding: "utf8" },
   );

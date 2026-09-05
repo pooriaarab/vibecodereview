@@ -670,8 +670,10 @@ runs:
         # so grepping the markdown counts members this run never dispatched.
         # A missing or unreadable sidecar means "no current members": 0 and 0.
         # Every failure mode below degrades to "0 0", so telemetry can never
-        # fail the step (which also has continue-on-error).
-        STATS="$(node --input-type=module -e 'import fs from "node:fs"; try { const s = JSON.parse(fs.readFileSync(process.env.VCR_STATS_FILE, "utf8")); const m = Number(s.memberCount); if (!Number.isInteger(m) || m < 0) throw new Error("bad memberCount"); console.log(m + " " + (s.cacheHit === true ? "1" : "0")); } catch { console.log("0 0"); }' 2>/dev/null || echo "0 0")"
+        # fail the step (which also has continue-on-error). The read itself
+        # lives in scripts/read-council-stats.mjs so council-stats.test.mjs
+        # can exercise this exact code instead of a copy of it.
+        STATS="$(node "${{ github.action_path }}/scripts/read-council-stats.mjs" 2>/dev/null || echo "0 0")"
         MEMBERS="$(printf '%s' "$STATS" | cut -d' ' -f1)"
         CACHE_HIT="$(printf '%s' "$STATS" | cut -d' ' -f2)"
         MEMBERS=${MEMBERS:-0}
