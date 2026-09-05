@@ -99,32 +99,3 @@ export function buildCouncilRecord(input) {
  *   attribution: Record<string, unknown>,
  * }} input
  */
-export function buildChairRecord({ verdictsPath, attribution }) {
-  const base = {
-    schemaVersion: SCHEMA_VERSION,
-    ts: new Date().toISOString(),
-    type: "review.chair",
-    attribution,
-  };
-  if (!verdictsPath || !fs.existsSync(verdictsPath)) {
-    return { ok: true, record: { ...base, dispositionsMissing: true } };
-  }
-  let parsed;
-  try {
-    parsed = JSON.parse(fs.readFileSync(verdictsPath, "utf8"));
-  } catch {
-    return { ok: true, record: { ...base, dispositionsMissing: true } };
-  }
-  const dispositions = Array.isArray(parsed?.dispositions) ? parsed.dispositions : [];
-  const record = {
-    ...base,
-    dispositionsMissing: false,
-    verdict: typeof parsed?.verdict === "string" ? parsed.verdict : undefined,
-    dispositions: dispositions.map((d) => ({
-      id: d.id,
-      classKey: d.classKey,
-      disposition: d.disposition,
-    })),
-  };
-  return { ok: true, record };
-}

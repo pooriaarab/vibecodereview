@@ -5,7 +5,6 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  buildChairRecord,
   buildCouncilRecord,
   detectStrength,
 } from "./vibetrace-records.mjs";
@@ -79,62 +78,6 @@ if (detectStrength("# x\n", "delta") !== "delta") {
   console.error("FAIL detectStrength delta");
   failed++;
 }
-
-const chairMissing = buildChairRecord({ verdictsPath: path.join(tmp, "missing-chair.json"), attribution: {} });
-if (!chairMissing.record.dispositionsMissing || chairMissing.record.dispositions) {
-  console.error("FAIL missing chair-verdicts should set dispositionsMissing", chairMissing.record);
-  failed++;
-} else {
-  console.log("ok - missing chair-verdicts.json sets dispositionsMissing");
-}
-
-const verdictsPath = path.join(tmp, "chair-verdicts.json");
-fs.writeFileSync(verdictsPath, JSON.stringify({
-  verdict: "comment",
-  dispositions: [{ id: "abc", classKey: "def", disposition: "confirmed-open" }],
-}));
-const chairPresent = buildChairRecord({ verdictsPath, attribution: {} });
-if (chairPresent.record.dispositionsMissing || chairPresent.record.verdict !== "comment") {
-  console.error("FAIL present chair-verdicts", chairPresent.record);
-  failed++;
-} else {
-  console.log("ok - chair-verdicts.json parsed into review.chair");
-}
-
-const chairEmitFile = path.join(tmp, "chair-emit.jsonl");
-const chairEmit = run(["review.chair", "--verdicts", verdictsPath], { VIBETRACE_FILE: chairEmitFile });
-if (chairEmit.status !== 0) {
-  console.error("FAIL review.chair emit exit", chairEmit.status, chairEmit.stderr);
-  failed++;
-} else {
-  const chairLine = JSON.parse(fs.readFileSync(chairEmitFile, "utf8").trim());
-  if (chairLine.type !== "review.chair" || chairLine.dispositionsMissing) {
-    console.error("FAIL review.chair record", chairLine);
-    failed++;
-  } else {
-    console.log("ok - CLI emits review.chair");
-  }
-}
-
-const chairMissingEmit = run(["review.chair", "--verdicts", path.join(tmp, "nope.json")], {
-  VIBETRACE_FILE: path.join(tmp, "chair-missing.jsonl"),
-});
-if (chairMissingEmit.status !== 0) {
-  console.error("FAIL missing chair emit exit", chairMissingEmit.status);
-  failed++;
-} else {
-  const missingLine = JSON.parse(fs.readFileSync(path.join(tmp, "chair-missing.jsonl"), "utf8").trim());
-  if (!missingLine.dispositionsMissing || missingLine.findings) {
-    console.error("FAIL missing chair must not look like zero findings", missingLine);
-    failed++;
-  } else if (missingLine.dispositions) {
-    console.error("FAIL missing chair should not include dispositions array", missingLine);
-    failed++;
-  } else {
-    console.log("ok - missing chair file fails open with dispositionsMissing");
-  }
-}
-
 fs.rmSync(tmp, { recursive: true, force: true });
 
 // --- strength must never mistake a skipped review for a full one ----------

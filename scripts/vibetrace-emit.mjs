@@ -1,12 +1,11 @@
 #!/usr/bin/env node
 // Silent-fail vibetrace emitter for council runs. Matches @vibetrace/schema
-// review.council and review.chair shapes. Never throws; never blocks the review check.
+// the review.council shape. Never throws; never blocks the review check.
 //
 // Usage:
 //   node vibetrace-emit.mjs review.council \
 //     --mode delta|full --cache-hit 0|1 --members N --cancelled 0|1 \
 //     [--findings council-findings.md] [--diff pr-delta.diff]
-//   node vibetrace-emit.mjs review.chair [--verdicts chair-verdicts.json]
 //
 // Env (all optional): VIBETRACE_INGEST_URL, VIBETRACE_INGEST_TOKEN, VIBETRACE_FILE,
 // GITHUB_REPOSITORY, VCR_PR / GITHUB_PR_NUMBER, GITHUB_HEAD_REF,
@@ -14,7 +13,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { buildChairRecord, buildCouncilRecord } from "./vibetrace-records.mjs";
+import { buildCouncilRecord } from "./vibetrace-records.mjs";
 
 function arg(name, fallback = undefined) {
   const i = process.argv.indexOf(name);
@@ -87,13 +86,7 @@ function buildRecord(kind) {
       diffMarkdown: readOptional(arg("--diff")),
     });
   }
-  if (kind === "review.chair") {
-    return buildChairRecord({
-      verdictsPath: arg("--verdicts", "chair-verdicts.json"),
-      attribution: attr,
-    });
-  }
-  return { ok: false, reason: `unsupported type; only review.council and review.chair` };
+  return { ok: false, reason: `unsupported type; only review.council` };
 }
 
 async function emit(record) {
