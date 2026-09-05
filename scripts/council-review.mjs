@@ -49,6 +49,7 @@ import {
   callModelWithFallback,
 } from "./council-members.mjs";
 import { cacheKey, loadCouncilResults, saveCouncilResult } from "./council-cache.mjs";
+import { withLensEffort } from "./lens-effort-config.mjs";
 import { behavioralSurface } from "./behavioral-surface.mjs";
 import { filterMembersByKindRouting, lensesForKinds, routeLenses } from "./lens-routing.mjs";
 import { appendFindingsMeta } from "./file-findings.mjs";
@@ -284,7 +285,12 @@ async function main() {
   // a lens with no applicable changed path must not pay for a no-op call.
   // Composed here rather than beside parseModels because applicability depends
   // on the diff read above.
+  // Effort is applied AFTER the mutation member is appended, not beside
+  // parseModels. withMutationMember adds a member that parseModels never
+  // returned, so decorating before it left MUTATION_EFFORT set, documented and
+  // never applied — a dead config key.
   let { members, mutationSkipped } = withMutationMember(models, memberDiffRaw);
+  members = withLensEffort(members);
   const lensPathFilter = process.env.LENS_PATH_FILTER;
   let skippedLenses = [...new Set(
     members.filter((m) => !lensCanReviewDiff(m.lens, memberDiffRaw, lensPathFilter)).map((m) => m.lens),
