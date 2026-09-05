@@ -33,14 +33,23 @@ const SKIP_MARKERS = {
  * fired, which a wrong-but-specific answer would not be. A run that errored
  * out is checked first and separately, for the same reason: a crash is not a
  * review that found nothing either.
+ *
+ * Only a line that BEGINS with a marker counts. The engine always writes each
+ * marker as its own line; a finding that merely quotes one is reviewer
+ * content. That distinction is load-bearing on this repo in particular, where
+ * the council reviews the very code these strings live in — an unanchored
+ * match turned a real full review with a genuine finding into `trivial`.
  */
 export function detectStrength(markdown, mode) {
-  const text = String(markdown || "");
-  if (text.includes(ERROR_PREFIX)) return "errored";
+  const lines = String(markdown || "").split("\n");
+  const startsWithAnchored = (line, marker) => line.trimStart().startsWith(marker);
+  if (lines.some((line) => startsWithAnchored(line, ERROR_PREFIX))) return "errored";
   for (const [strength, marker] of Object.entries(SKIP_MARKERS)) {
-    if (text.includes(marker)) return /** @type {ReviewStrength} */ (strength);
+    if (lines.some((line) => startsWithAnchored(line, marker))) {
+      return /** @type {ReviewStrength} */ (strength);
+    }
   }
-  if (text.includes(SKIP_PREFIX)) return "skipped";
+  if (lines.some((line) => startsWithAnchored(line, SKIP_PREFIX))) return "skipped";
   return mode === "delta" ? "delta" : "full";
 }
 
