@@ -28,7 +28,8 @@ member is skipped, not an error:
 - `OPENAI_API_KEY` — correctness
 - `GEMINI_API_KEY` — performance
 - `MOONSHOT_API_KEY` — security
-- `OPENROUTER_API_KEY` — maintainability (Grok / DeepSeek)
+- `OPENROUTER_API_KEY` — cheap leftovers (DeepSeek / GLM). Never Claude, Codex, or Grok.
+- `CLAUDE_CODE_OAUTH_TOKEN` through `_4` — chair + any Claude council seat
 
 ## Set it up in a repo (CI)
 

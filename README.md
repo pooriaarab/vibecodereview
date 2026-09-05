@@ -27,9 +27,9 @@ verdict, self-healing fix.
 | GPT / Codex | api.openai.com | `OPENAI_API_KEY` | correctness, silent failures |
 | Gemini | generativelanguage.googleapis.com | `GEMINI_API_KEY` | performance, type design |
 | Kimi | api.moonshot.ai | `MOONSHOT_API_KEY` | security |
-| Grok / DeepSeek | openrouter.ai | `OPENROUTER_API_KEY` | maintainability, data integrity |
-| GPT-5.6 (scope) | openrouter.ai | `OPENROUTER_API_KEY` | scope, atomicity, and the evidence in the body |
-| Sonnet (mutation) | openrouter.ai | `OPENROUTER_API_KEY` | can these tests fail at all — **off by default** |
+| DeepSeek V4 Flash | openrouter.ai | `OPENROUTER_API_KEY` | maintainability, data integrity |
+| GLM 5.3 Flash (scope) | openrouter.ai | `OPENROUTER_API_KEY` | scope, atomicity, and the evidence in the body |
+| Sonnet (mutation) | Claude OAuth seat | `CLAUDE_CODE_OAUTH_TOKEN` | can these tests fail at all — **off by default** |
 
 A member with no key drops out. No key at all → the council step is skipped, and
 Claude still reviews alone. Nothing here blocks the PR on a provider outage.
@@ -146,10 +146,10 @@ Two honest limits:
   question to ask about a documentation change, and the report says so rather
   than staying silent — silence would read as "found nothing".
 
-`mutation_model` overrides the model, over OpenRouter, with its own env var so
-setting it cannot silently repoint the scope or maintainability lens (both also
-ride OpenRouter). It still shares `OPENROUTER_API_KEY` with those lenses, so an
-exhausted key takes all three out together, not just one.
+`mutation_model` is the Claude CLI model name (default `claude-sonnet-5`).
+Mutation runs on a Claude OAuth seat, never OpenRouter. Set
+`MUTATION_PROVIDER=claude2` (or `claude3` / `claude4`) to pick a different
+token so it does not share the chair's primary subscription.
 
 ### Claude subscription seats
 
@@ -159,17 +159,20 @@ still lists four reviewers, so a PR looks multi-model reviewed when only the
 chair ran.
 
 A Claude Code OAuth token is not an API bearer, so it cannot hold a normal
-seat. The `claude` and `claude2` providers shell the Claude Code CLI (already
-installed for the chair) instead of POSTing, putting the cost on the
-subscription. `claude2` lets a second subscription hold a real seat rather
-than idling as the chair's failover token.
+seat. The `claude`, `claude2`, `claude3`, and `claude4` providers shell the
+Claude Code CLI (already installed for the chair) instead of POSTing, putting
+the cost on the subscription. Extra tokens (`CLAUDE_CODE_OAUTH_TOKEN_5` and
+up) become `claude5` automatically. **OpenRouter must never carry a Claude,
+Codex, or Grok model** — the engine skips those ids before the HTTP call.
+Those families have their own subscriptions. OpenRouter is DeepSeek / GLM
+only.
 
 ```yaml
 council_models: >-
   claude|claude-opus-5|Claude Opus 5|correctness,
   claude2|claude-sonnet-5|Claude Sonnet 5|security,
-  openrouter|google/gemini-3.1-pro-preview|Gemini 3.1 Pro|performance,
-  openrouter|x-ai/grok-4.6|Grok 4.6|maintainability
+  claude3|claude-sonnet-5|Claude Sonnet 5|performance,
+  openrouter|deepseek/deepseek-v4-flash|DeepSeek V4 Flash|maintainability
 ```
 
 The seats run with no tools, `--max-turns 1`, and a working directory outside

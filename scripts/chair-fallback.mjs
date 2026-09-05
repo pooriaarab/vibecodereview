@@ -10,17 +10,18 @@
 //
 // Usage: node chair-fallback.mjs <diff-file> <council-findings-file>
 // Env: OPENROUTER_API_KEY, GH_TOKEN, GITHUB_REPOSITORY, PR_NUMBER,
-//      CHAIR_FALLBACK_MODEL (default anthropic/claude-sonnet-5),
+//      CHAIR_FALLBACK_MODEL (default deepseek/deepseek-v4-flash — never Claude, Codex, or Grok),
 //      PR_CONTEXT_FILE, VCR_REQUIRE_PROOF
 
 import fs from "node:fs";
 import { execFileSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { parseVerdict, truncate } from "./verdict-json.mjs";
+import { resolveChairFallbackModel, bannedOpenRouterReason } from "./openrouter-policy.mjs";
 
 const MAX_DIFF_CHARS = 180_000;
 const TIMEOUT_MS = Number(process.env.CHAIR_FALLBACK_TIMEOUT_MS) || 180_000;
-const MODEL = process.env.CHAIR_FALLBACK_MODEL || "anthropic/claude-sonnet-5";
+const MODEL = resolveChairFallbackModel().model;
 const SEVERITIES = { critical: "Critical", major: "Major", minor: "Minor" };
 
 // The proof lens travels three code paths: the council scope lens, the primary
@@ -260,6 +261,17 @@ function selfcheck() {
   }
   if (!threw) throw new Error("selfcheck: malformed JSON was accepted");
 
+  const resolved = resolveChairFallbackModel("");
+  if (bannedOpenRouterReason(resolved.model) || resolved.error) {
+    throw new Error("selfcheck: default chair fallback is banned on OpenRouter");
+  }
+  if (!bannedOpenRouterReason("anthropic/claude-sonnet-5")) {
+    throw new Error("selfcheck: Claude via OpenRouter was not banned");
+  }
+  if (!bannedOpenRouterReason("x-ai/grok-4.5")) {
+    throw new Error("selfcheck: Grok via OpenRouter was not banned");
+  }
+
   console.log("chair-fallback selfcheck passed");
 }
 
@@ -270,6 +282,8 @@ async function main() {
   const pr = process.env.PR_NUMBER;
   if (!process.env.OPENROUTER_API_KEY?.trim()) throw new Error("OPENROUTER_API_KEY not set");
   if (!repo || !pr) throw new Error("GITHUB_REPOSITORY and PR_NUMBER are required");
+  const resolved = resolveChairFallbackModel();
+  if (resolved.error) throw new Error(resolved.error);
 
   const diff = diffFile && fs.existsSync(diffFile) ? fs.readFileSync(diffFile, "utf8") : "";
   if (!diff.trim()) throw new Error("empty diff");
