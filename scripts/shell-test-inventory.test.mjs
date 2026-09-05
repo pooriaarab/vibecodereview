@@ -39,7 +39,7 @@ assert.deepEqual(
 // run names every failure instead of only the first. Check by position, not
 // by count: two unguarded steps and two extra guarded ones must not cancel
 // out into a passing total.
-const unguarded = stepNames.slice(1).filter((_, i) => !steps[i + 1].includes("cancelled()"));
+const unguarded = stepNames.slice(1).filter((_, i) => !steps[i + 1].includes("!cancelled()"));
 assert.deepEqual(
   unguarded,
   [],
