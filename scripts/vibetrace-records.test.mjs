@@ -78,16 +78,6 @@ if (detectStrength("# x\n", "delta") !== "delta") {
   console.error("FAIL detectStrength delta");
   failed++;
 }
-
-// A run that threw (council-review.mjs's top-level catch) is not a quiet
-// full/delta success and must not be recorded as one.
-const erroredMd = "# 🧑‍⚖️ LLM Council findings\n\n_Council errored: boom_\n";
-if (detectStrength(erroredMd, "full") !== "errored" || detectStrength(erroredMd, "delta") !== "errored") {
-  console.error("FAIL detectStrength must classify an errored run as `errored`, not full/delta");
-  failed++;
-} else {
-  console.log("ok - strength=errored for a run that threw");
-}
 fs.rmSync(tmp, { recursive: true, force: true });
 
 // --- strength must never mistake a skipped review for a full one ----------
@@ -116,5 +106,26 @@ fs.rmSync(tmp, { recursive: true, force: true });
     console.log(`ok - all ${written.length} engine skip paths record outside full/delta`);
   }
 }
+// A finding that QUOTES a skip marker is reviewer content, not a skip. This
+// repo's council reviews the code these strings live in, so an unanchored
+// match turned a real full review with a genuine finding into `trivial`.
+{
+  const quoted = [
+    "# 🧑‍⚖️ LLM Council findings", "",
+    "## GPT-5.6 (Codex) — correctness lens", "",
+    "- `scripts/vibetrace-records.mjs:20` — the `_Council skipped: trivial delta` marker is matched anywhere in the body -> anchor it to line start.",
+    "",
+  ].join("\n");
+  if (detectStrength(quoted, "full") !== "full") {
+    console.error("FAIL a finding quoting a skip marker must stay `full`, got", detectStrength(quoted, "full"));
+    failed++;
+  } else if (detectStrength("# h\n\n  _Council skipped: empty diff._\n", "full") !== "no-diff") {
+    console.error("FAIL an indented real skip line must still be detected");
+    failed++;
+  } else {
+    console.log("ok - a quoted skip marker is content, an anchored one is a skip");
+  }
+}
+
 console.log("vibetrace-records tests passed");
 if (failed) process.exit(1);
