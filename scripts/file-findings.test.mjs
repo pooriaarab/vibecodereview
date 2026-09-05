@@ -2,11 +2,12 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
-  buildTitle,
   buildIssue,
+  extractLensFamily,
   fingerprint,
   isEmptyReview,
   parseFindings,
+  stemText,
 } from './file-findings.mjs';
 
 const REVIEW = `# 🧑‍⚖️ LLM Council findings
@@ -135,4 +136,44 @@ test('a finding with no usable clause still gets a title', () => {
   const { title } = buildIssue(finding, { repo: 'pooriaarab/x', prNumber: 1 });
   assert.ok(title.length >= 10, title);
   assert.match(title, /thing\.ts/);
+});
+
+test('findings differing only by line number share a classKey', () => {
+  const a = parseFindings('## GPT — correctness lens\n\n- `src/x.ts:10` — leak on error path -> handle it.\n');
+  const b = parseFindings('## GPT — correctness lens\n\n- `src/x.ts:99` — leak on error path -> handle it.\n');
+  assert.equal(a[0].classKey, b[0].classKey);
+  assert.notEqual(a[0].id, b[0].id);
+});
+
+test('findings differing only by model name share a classKey', () => {
+  const a = parseFindings('## GPT-5.6 — security lens\n\n- `src/auth.ts:1` — token not validated -> validate.\n');
+  const b = parseFindings('## Kimi K3 — security lens\n\n- `src/auth.ts:1` — token not validated -> validate.\n');
+  assert.equal(a[0].classKey, b[0].classKey);
+  assert.equal(a[0].lensFamily, 'security');
+  assert.equal(b[0].lensFamily, 'security');
+});
+
+test('genuinely different defects do not share a classKey', () => {
+  const a = parseFindings('## M — security lens\n\n- `src/a.ts:1` — missing auth check -> add guard.\n');
+  const b = parseFindings('## M — security lens\n\n- `src/a.ts:1` — sql injection in query -> parameterize.\n');
+  assert.notEqual(a[0].classKey, b[0].classKey);
+});
+
+test('stemText matches buildTitle first-clause cut', () => {
+  const text = 'prepareCreditCharge runs twice -> skip when header present.';
+  assert.equal(stemText(text), 'prepareCreditCharge runs twice');
+  const [finding] = parseFindings(`## M — lens\n\n- \`src/x.ts:1\` — ${text}\n`);
+  const { title } = buildIssue(finding, { repo: 'pooriaarab/x', prNumber: 1 });
+  assert.match(title.toLowerCase(), /preparecreditcharge runs twice/);
+});
+
+test('parseFindings path drops the line suffix for classKey', () => {
+  const a = parseFindings('## M — security lens\n\n- `src/auth.ts:9` — bad token handling -> fix.\n');
+  const b = parseFindings('## M — security lens\n\n- `src/auth.ts:42` — bad token handling -> fix.\n');
+  assert.equal(a[0].path, 'src/auth.ts');
+  assert.equal(a[0].classKey, b[0].classKey);
+});
+
+test('extractLensFamily ignores cached suffix on heading', () => {
+  assert.equal(extractLensFamily('GPT — correctness lens (cached)'), 'correctness');
 });

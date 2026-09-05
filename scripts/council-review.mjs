@@ -51,6 +51,7 @@ import {
 import { cacheKey, loadCouncilResults, saveCouncilResult } from "./council-cache.mjs";
 import { behavioralSurface } from "./behavioral-surface.mjs";
 import { filterMembersByKindRouting, lensesForKinds, routeLenses } from "./lens-routing.mjs";
+import { appendFindingsMeta } from "./file-findings.mjs";
 
 async function main() {
   if (process.argv.includes("--selfcheck")) {
@@ -211,10 +212,11 @@ async function main() {
   const priorFindings = process.env.VCR_PRIOR_FINDINGS_FILE && fs.existsSync(process.env.VCR_PRIOR_FINDINGS_FILE)
     ? fs.readFileSync(process.env.VCR_PRIOR_FINDINGS_FILE, "utf8")
     : "";
-  // The ONLY way to write the report. It preserves the carry alongside it, so
-  // a future early return that uses `write` cannot forget the carry file.
+  // The ONLY way to write the report. It appends the findings metadata the
+  // trace records read, and preserves the carry alongside the report, so a
+  // future early return that uses `write` can forget neither.
   const write = (md, carry = priorFindings) => {
-    fs.writeFileSync(outFile, md);
+    fs.writeFileSync(outFile, appendFindingsMeta(md));
     if (process.env.VCR_CARRY_FILE) fs.writeFileSync(process.env.VCR_CARRY_FILE, carry);
   };
 
@@ -355,7 +357,7 @@ main().catch((err) => {
   try {
     fs.writeFileSync(
       process.argv[3] || "council-findings.md",
-      `# 🧑‍⚖️ LLM Council findings\n\n_Council errored: ${String(err?.message || err)}_\n`,
+      appendFindingsMeta(`# 🧑‍⚖️ LLM Council findings\n\n_Council errored: ${String(err?.message || err)}_\n`),
     );
   } catch {}
   process.exit(0);
