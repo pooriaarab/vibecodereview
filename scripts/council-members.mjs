@@ -11,6 +11,7 @@ import {
   DEFAULT_MODELS,
 } from "./council-config.mjs";
 import { callClaudeCli } from "./claude-cli-seat.mjs";
+import { cliEffortRung, effortWireExtras } from "./lens-effort-config.mjs";
 
 // Members run in parallel, so the council costs max(member latency), not the
 // sum — the timeout is therefore a direct tail-latency tax on every run. In
@@ -33,6 +34,19 @@ export function parseModels() {
       return { provider, model, name: name || model, lens: lens || "correctness" };
     })
     .filter((m) => m.provider && m.model && PROVIDERS[m.provider]);
+}
+
+export function buildRequestBody(model, diff) {
+  const body = {
+    model: model.model,
+    messages: [
+      { role: "system", content: systemPrompt(model.lens) },
+      { role: "user", content: `PR diff:\n\n${diff}` },
+    ],
+  };
+  const extras = effortWireExtras(model);
+  if (extras) Object.assign(body, extras);
+  return body;
 }
 
 export function systemPrompt(lens) {
@@ -58,6 +72,7 @@ export function systemPrompt(lens) {
 export async function callModel(model, diff) {
   const startedAt = Date.now();
   const timed = (r) => ({ ...r, ms: Date.now() - startedAt });
+  if (model.effortParseError) return timed({ model, error: model.effortParseError });
   const provider = PROVIDERS[model.provider];
   // A subscription seat has no chat endpoint to POST to.
   if (provider?.cli) {
@@ -65,7 +80,11 @@ export async function callModel(model, diff) {
     if (!token) return timed({ model, error: `skipped: ${provider.keyEnv} not set` });
     const instructions = `${systemPrompt(model.lens)}\n\nReview the PR diff piped on stdin.`;
     return timed(
-      await callClaudeCli(model, diff, token, { instructions, timeoutMs: CLI_TIMEOUT_MS }),
+      await callClaudeCli(model, diff, token, {
+        instructions,
+        timeoutMs: CLI_TIMEOUT_MS,
+        effortRung: cliEffortRung(model),
+      }),
     );
   }
   if (provider && !provider.url) return timed({ model, error: "skipped: CUSTOM_BASE_URL not set" });
@@ -84,13 +103,7 @@ export async function callModel(model, diff) {
         "Content-Type": "application/json",
         "X-Title": "Content Rabbit PR Council",
       },
-      body: JSON.stringify({
-        model: model.model,
-        messages: [
-          { role: "system", content: systemPrompt(model.lens) },
-          { role: "user", content: `PR diff:\n\n${diff}` },
-        ],
-      }),
+      body: JSON.stringify(buildRequestBody(model, diff)),
     });
     if (!res.ok) {
       const body = await res.text().catch(() => "");

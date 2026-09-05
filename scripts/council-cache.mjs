@@ -4,6 +4,7 @@
 
 import { createHash } from "node:crypto";
 import { PROMPT_VERSION } from "./council-config.mjs";
+import { effortCacheSegment } from "./lens-effort-config.mjs";
 
 const CACHE_MARKER = "<!-- vibecodereview:council-result:";
 const PAGE_SIZE = 100;
@@ -53,6 +54,7 @@ export function cacheKey(diff, model) {
     .update(Buffer.from(String(diff), "utf8"))
     .update(Buffer.from(memberId(model), "utf8"))
     .update(Buffer.from(model.lens, "utf8"))
+    .update(Buffer.from(effortCacheSegment(model), "utf8"))
     .update(Buffer.from(PROMPT_VERSION, "utf8"))
     .digest("hex");
 }

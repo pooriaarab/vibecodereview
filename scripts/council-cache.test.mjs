@@ -25,6 +25,10 @@ assert.equal(memberId(member), "openai|gpt-5.6|GPT-5.6 (Codex)");
 assert.notEqual(cacheKey(`${diff} `, member), key);
 assert.notEqual(cacheKey(diff, { ...member, lens: "security" }), key);
 assert.notEqual(cacheKey(diff, { ...member, model: "gpt-5.5" }), key);
+assert.notEqual(
+  cacheKey(diff, { ...member, effortConfigured: true, effortPosition: 0 }),
+  cacheKey(diff, { ...member, effortConfigured: true, effortPosition: 1 }),
+);
 
 function makeComment(keyToUse, text = "No findings.") {
   const payload = Buffer.from(JSON.stringify({ model: member, text }), "utf8").toString("base64");

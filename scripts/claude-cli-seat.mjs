@@ -1,7 +1,7 @@
 // A Claude subscription seat: there is no OpenAI-compatible URL that accepts a
 // Claude Code OAuth token, so this seat shells the Claude Code CLI the action
 // already installs for the chair instead of POSTing to a chat endpoint.
-export async function callClaudeCli(model, diff, oauthToken, { instructions, timeoutMs }) {
+export async function callClaudeCli(model, diff, oauthToken, { instructions, timeoutMs, effortRung }) {
   const { execFile } = await import("node:child_process");
   const os = await import("node:os");
   // Short lens instructions on argv, the diff on stdin. Both forms work —
@@ -49,6 +49,7 @@ export async function callClaudeCli(model, diff, oauthToken, { instructions, tim
         "",
         "--max-turns",
         "1",
+        ...(effortRung ? ["--effort", effortRung] : []),
       ],
       {
         timeout: timeoutMs,

@@ -49,6 +49,7 @@ import {
   callModelWithFallback,
 } from "./council-members.mjs";
 import { cacheKey, loadCouncilResults, saveCouncilResult } from "./council-cache.mjs";
+import { withLensEffort } from "./lens-effort-config.mjs";
 import { behavioralSurface } from "./behavioral-surface.mjs";
 import { filterMembersByKindRouting, lensesForKinds, routeLenses } from "./lens-routing.mjs";
 import { appendFindingsMeta } from "./file-findings.mjs";
@@ -220,7 +221,7 @@ async function main() {
     if (process.env.VCR_CARRY_FILE) fs.writeFileSync(process.env.VCR_CARRY_FILE, carry);
   };
 
-  const models = parseModels();
+  const models = withLensEffort(parseModels());
   if (models.length === 0) {
     write(
       "# 🧑‍⚖️ LLM Council findings\n\n_Council skipped: COUNCIL_MODELS parsed to no valid members (expected `provider|model|Name|lens`; providers: openai, gemini, moonshot, openrouter, custom)._\n",
