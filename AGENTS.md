@@ -39,7 +39,7 @@ Read `.agents/brand.md` and `.agents/design.md` before public copy or interface 
   id — the engine skips those before the HTTP call. Add a seat by setting
   `CLAUDE_CODE_OAUTH_TOKEN_N` (provider `claudeN`).
 - A member with no API key must skip with a note, never throw.
-- The council uses a scope lens to verify atomicity and claim alignment. Set `PR_CONTEXT_FILE` to a file containing the author's claim (title, body, closed issues) to feed this lens.
+- The council uses a scope lens to verify atomicity and claim alignment. Set `PR_CONTEXT_FILE` to a file containing the author's claim (title, body, closed issues) to feed this lens. Review weight may drop that lens on low-risk deltas — the chair still judges the claim. `VCR_REVIEW_WEIGHT=off` restores the routed roster.
 - A composite action's `inputs:` block must contain NO `${{ }}` expressions — not in a default AND not in a description string; GitHub parses them and fails at 'Set up job'. Callers pass github_token explicitly.
 - Secrets never land in git. CI secrets live in repo settings; local keys in env.
 - After any engine change, run `node scripts/council-review.mjs --selfcheck`.
