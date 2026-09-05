@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 
 import {
+  alreadyFiled,
   buildIssue,
   extractLensFamily,
   fingerprint,
@@ -176,4 +180,65 @@ test('parseFindings path drops the line suffix for classKey', () => {
 
 test('extractLensFamily ignores cached suffix on heading', () => {
   assert.equal(extractLensFamily('GPT — correctness lens (cached)'), 'correctness');
+});
+
+test('buildIssue output contains both the finding and class key markers', () => {
+  const [finding] = parseFindings(REVIEW);
+  const { body } = buildIssue(finding, { repo: 'pooriaarab/x', prNumber: 42 });
+  assert.ok(body.includes(`vibecodereview-finding:${finding.id}`));
+  assert.ok(body.includes(`vibecodereview-class:${finding.classKey}`));
+  assert.ok(body.includes(`vibecodereview-lens:${finding.lensFamily}`));
+});
+
+test('findings differing only by line number produce different finding markers and the same class marker in buildIssue', () => {
+  const text = 'leak on error path -> handle it.';
+  const a = parseFindings(`## GPT — correctness lens\n\n- \`src/x.ts:10\` — ${text}\n`);
+  const b = parseFindings(`## GPT — correctness lens\n\n- \`src/x.ts:99\` — ${text}\n`);
+  assert.equal(a.length, 1);
+  assert.equal(b.length, 1);
+  assert.notEqual(a[0].id, b[0].id);
+  assert.equal(a[0].classKey, b[0].classKey);
+  const { body: bodyA } = buildIssue(a[0], { repo: 'pooriaarab/x', prNumber: 1 });
+  const { body: bodyB } = buildIssue(b[0], { repo: 'pooriaarab/x', prNumber: 1 });
+  assert.ok(bodyA.includes(`vibecodereview-finding:${a[0].id}`));
+  assert.ok(bodyB.includes(`vibecodereview-finding:${b[0].id}`));
+  assert.ok(bodyA.includes(`vibecodereview-class:${a[0].classKey}`));
+  assert.ok(bodyB.includes(`vibecodereview-class:${b[0].classKey}`));
+});
+
+test('buildIssue carries optional head sha and strength when provided', () => {
+  const [finding] = parseFindings(REVIEW);
+  const { body } = buildIssue(finding, {
+    repo: 'pooriaarab/x',
+    prNumber: 42,
+    headSha: 'abc123def456',
+    strength: 'full',
+  });
+  assert.ok(body.includes('vibecodereview-head:abc123def456'));
+  assert.ok(body.includes('vibecodereview-strength:full'));
+});
+
+test('alreadyFiled still searches the finding id marker, not the class marker', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vcr-gh-'));
+  const ghPath = path.join(tmpDir, 'gh');
+  const recorded = path.join(tmpDir, 'recorded.json');
+  const fakeGh = `#!/usr/bin/env node\nconst fs = require('fs');\nconst out = process.env.VCR_GH_RECORD;\nif (out) fs.writeFileSync(out, JSON.stringify(process.argv.slice(2)) + '\\n');\nprocess.stdout.write('[]\\n');\n`;
+  fs.writeFileSync(ghPath, fakeGh);
+  fs.chmodSync(ghPath, 0o755);
+  const originalPath = process.env.PATH;
+  process.env.PATH = `${tmpDir}${path.delimiter}${originalPath}`;
+  process.env.VCR_GH_RECORD = recorded;
+  try {
+    const result = alreadyFiled('pooriaarab/x', 'finding-id-123');
+    assert.equal(result, null);
+    const args = JSON.parse(fs.readFileSync(recorded, 'utf8').trim());
+    const joined = args.join(' ');
+    assert.ok(joined.includes('vibecodereview-finding:finding-id-123'));
+    assert.ok(!joined.includes('vibecodereview-class:'));
+    assert.ok(!joined.includes('vibecodereview-lens:'));
+  } finally {
+    process.env.PATH = originalPath;
+    delete process.env.VCR_GH_RECORD;
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
 });

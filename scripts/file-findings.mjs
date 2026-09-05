@@ -148,7 +148,7 @@ export function buildTitle(finding, path) {
 // Written to the issue standard so `issue-standards check` passes on what this
 // files. A finding is a defect, so it is filed as a bug: the trigger the
 // council was required to name is the reproduction.
-export function buildIssue(finding, { repo, prNumber, runUrl }) {
+export function buildIssue(finding, { repo, prNumber, runUrl, headSha, strength }) {
   const [path] = finding.location.split(':');
   const title = buildTitle(finding, path);
   const body = [
@@ -175,6 +175,10 @@ export function buildIssue(finding, { repo, prNumber, runUrl }) {
     `> Filed automatically from a review that #${prNumber} did not fix. Not triaged, and not agreed: read it before acting.`,
     runUrl ? `> Review run: ${runUrl}` : '',
     `> \`${MARKER}:${finding.id}\``,
+    `> \`vibecodereview-class:${finding.classKey}\``,
+    `> \`vibecodereview-lens:${finding.lensFamily}\``,
+    strength ? `> \`vibecodereview-strength:${strength}\`` : '',
+    headSha ? `> \`vibecodereview-head:${headSha}\`` : '',
   ].filter((line) => line !== '').join('\n');
   return { title, body };
 }
@@ -182,7 +186,7 @@ export function buildIssue(finding, { repo, prNumber, runUrl }) {
 // Every filed issue lands in triage. Nothing here decides priority.
 const LABELS = ['bug', 'triage'];
 
-export function fileFindings(markdown, { repo, prNumber, runUrl, dryRun = false } = {}) {
+export function fileFindings(markdown, { repo, prNumber, runUrl, dryRun = false, headSha, strength } = {}) {
   const findings = parseFindings(markdown);
   const filed = [];
   const skipped = [];
@@ -192,7 +196,7 @@ export function fileFindings(markdown, { repo, prNumber, runUrl, dryRun = false 
       skipped.push({ ...finding, reason: `already filed as #${existing}` });
       continue;
     }
-    const { title, body } = buildIssue(finding, { repo, prNumber, runUrl });
+    const { title, body } = buildIssue(finding, { repo, prNumber, runUrl, headSha, strength });
     if (dryRun) {
       filed.push({ ...finding, title, dryRun: true });
       continue;
@@ -247,6 +251,7 @@ export async function main(argv) {
     prNumber: options.pr,
     runUrl: options.runUrl,
     dryRun: options.dryRun,
+    headSha: process.env.VCR_REVIEW_HEAD_SHA,
   });
   for (const item of result.filed) {
     process.stdout.write(`${item.dryRun ? 'would file' : 'filed'}  ${item.location}  ${item.url || ''}\n`);
