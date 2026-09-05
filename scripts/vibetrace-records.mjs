@@ -1,5 +1,4 @@
 // vibetrace record builders — council cost/routing plus defect measurement.
-import fs from "node:fs";
 import { parseFindings } from "./file-findings.mjs";
 import { countAddedLines } from "./review-delta.mjs";
 
@@ -9,6 +8,10 @@ export const SCHEMA_VERSION = "0.2.0";
 // review out of the `full` bucket; the table below only refines WHICH skip.
 export const SKIP_PREFIX = "_Council skipped:";
 
+// Written by council-review.mjs's top-level catch. A run that threw is not a
+// quiet success, so it must not fall through to `full`/`delta` either.
+export const ERROR_PREFIX = "_Council errored:";
+
 const SKIP_MARKERS = {
   trivial: "_Council skipped: trivial delta",
   "no-lenses": "_Council skipped: no configured lens applies",
@@ -17,7 +20,7 @@ const SKIP_MARKERS = {
   "no-members": "_Council skipped: COUNCIL_MODELS parsed to no valid members",
 };
 
-/** @typedef {"full"|"delta"|"trivial"|"no-lenses"|"no-keys"|"no-diff"|"no-members"|"skipped"} ReviewStrength */
+/** @typedef {"full"|"delta"|"trivial"|"no-lenses"|"no-keys"|"no-diff"|"no-members"|"skipped"|"errored"} ReviewStrength */
 
 /**
  * @param {string} markdown @param {"full"|"delta"} mode @returns {ReviewStrength}
@@ -27,22 +30,26 @@ const SKIP_MARKERS = {
  * ran, so a skip path added later that nobody added a marker for must not
  * silently land in the `full` bucket and read as "reviewed, found nothing".
  * `skipped` is deliberately coarse: it is honest about not knowing which gate
- * fired, which a wrong-but-specific answer would not be.
+ * fired, which a wrong-but-specific answer would not be. A run that errored
+ * out is checked first and separately, for the same reason: a crash is not a
+ * review that found nothing either.
+ *
+ * Only a line that BEGINS with a marker counts. The engine always writes each
+ * marker as its own line; a finding that merely quotes one is reviewer
+ * content. That distinction is load-bearing on this repo in particular, where
+ * the council reviews the very code these strings live in — an unanchored
+ * match turned a real full review with a genuine finding into `trivial`.
  */
 export function detectStrength(markdown, mode) {
-  // Only a line that BEGINS with the marker counts. The engine always writes it
-  // as its own line; a finding that merely quotes it is reviewer content. That
-  // distinction is load-bearing on this repo in particular, where the council
-  // reviews the very code these strings live in — an unanchored match turned a
-  // real full review with a genuine finding into `trivial`.
   const lines = String(markdown || "").split("\n");
-  const isSkipLine = (line) => line.trimStart().startsWith(SKIP_PREFIX);
+  const startsWithAnchored = (line, marker) => line.trimStart().startsWith(marker);
+  if (lines.some((line) => startsWithAnchored(line, ERROR_PREFIX))) return "errored";
   for (const [strength, marker] of Object.entries(SKIP_MARKERS)) {
-    if (lines.some((line) => isSkipLine(line) && line.trimStart().startsWith(marker))) {
+    if (lines.some((line) => startsWithAnchored(line, marker))) {
       return /** @type {ReviewStrength} */ (strength);
     }
   }
-  if (lines.some(isSkipLine)) return "skipped";
+  if (lines.some((line) => startsWithAnchored(line, SKIP_PREFIX))) return "skipped";
   return mode === "delta" ? "delta" : "full";
 }
 
@@ -100,10 +107,3 @@ export function buildCouncilRecord(input) {
     },
   };
 }
-
-/**
- * @param {{
- *   verdictsPath?: string,
- *   attribution: Record<string, unknown>,
- * }} input
- */
