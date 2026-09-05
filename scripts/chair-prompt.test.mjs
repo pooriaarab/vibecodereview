@@ -38,8 +38,13 @@ for (const [, inner] of prompt.matchAll(/\(([^()]*)\)/g)) {
   const hits = new Set((inner.match(new RegExp(`\\b(?:${alternation})\\b`, "gi")) || []).map((w) => w.toLowerCase()));
   if (hits.size >= 2) offenders.push(inner.replace(/\s+/g, " ").trim());
 }
-// ...as is a bare comma/and/or list of them outside parentheses.
-for (const [match] of prompt.matchAll(new RegExp(`\\b(?:${alternation})\\b(?:\\s*(?:,|and|or)\\s*\\b(?:${alternation})\\b)+`, "gi"))) {
+// ...as is a bare list of them outside parentheses, whatever the separator —
+// comma, "and"/"or", slash, semicolon, pipe, dash, bullet, or a line break
+// before the next bullet. The failure this guards against (VCR-124) was a
+// hand-typed inventory read as prose; the separator between the words is
+// incidental to that, so the guard must not depend on which one was used.
+const SEPARATOR = String.raw`(?:\s*(?:,|and|or|\/|;|\||-|–|—|•|\*)\s*)`;
+for (const [match] of prompt.matchAll(new RegExp(`\\b(?:${alternation})\\b(?:${SEPARATOR}\\b(?:${alternation})\\b)+`, "gi"))) {
   offenders.push(match.replace(/\s+/g, " ").trim());
 }
 
