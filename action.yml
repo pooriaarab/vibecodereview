@@ -943,6 +943,7 @@ runs:
     - name: Trivial delta review
       id: trivial_review
       if: steps.budget.outputs.over != 'true' && steps.council_start.outputs.trivial == 'true'
+      continue-on-error: true
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.github_token }}
