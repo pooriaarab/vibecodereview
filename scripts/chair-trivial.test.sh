@@ -27,6 +27,7 @@ open(sys.argv[2], "w").write(json.dumps({
       "if": s.get("if") or "",
       "run": s.get("run") or "",
       "uses": s.get("uses") or "",
+      "continue_on_error": s.get("continue-on-error"),
     }
     for s in steps
   ],
@@ -72,6 +73,8 @@ ok("steps.budget.outputs.over != 'true'" in trivial.get("if", ""),
    "trivial review still respects the budget guard")
 ok("trivial-chair.mjs" in trivial.get("run", ""), "trivial review runs trivial-chair.mjs")
 ok("check-runs" not in trivial.get("run", ""), "trivial review does not create a different check-run")
+ok(trivial.get("continue_on_error") is True,
+   "trivial review has continue-on-error so a failed post still reaches the result gate")
 
 chair_names = [
     "Install Claude Code CLI",
