@@ -13,8 +13,12 @@ export const LENS_EFFORT_ENV = {
   mutation: "MUTATION_EFFORT",
 };
 
-/** @param {{ lens: string, effortConfigured?: boolean, effortPosition?: number }} model */
+/** @param {{ lens: string, effortConfigured?: boolean, effortPosition?: number, effortParseError?: string }} model */
 export function effortCacheSegment(model) {
+  // An invalid *_EFFORT must never key the same as unset — a stale cache hit
+  // would return the old cached completion and callModel's effortParseError
+  // check (which surfaces the typo) would never run.
+  if (model.effortParseError) return `error:${model.effortParseError}`;
   if (!model.effortConfigured || model.effortPosition === undefined) return "";
   return String(model.effortPosition);
 }

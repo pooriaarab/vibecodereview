@@ -7,7 +7,7 @@ import {
   rungPosition,
 } from "./lens-effort.mjs";
 import { LADDERS_FOR_TESTS, offeredRungs } from "./model-effort-ladders.mjs";
-import { withLensEffort } from "./lens-effort-config.mjs";
+import { cliEffortRung, effortCacheSegment, withLensEffort } from "./lens-effort-config.mjs";
 import { buildRequestBody } from "./council-members.mjs";
 import { cacheKey } from "./council-cache.mjs";
 
@@ -70,6 +70,28 @@ const configured = { ...member, effortConfigured: true, effortPosition: 0 };
 const wired = buildRequestBody(configured, diff);
 assert.equal(wired.reasoning_effort, "low");
 
+// --- OpenRouter gets the nested reasoning.effort shape, not reasoning_effort ---
+const openRouterMember = { ...member, provider: "openrouter", effortConfigured: true, effortPosition: 0 };
+const openRouterBody = buildRequestBody(openRouterMember, diff);
+assert.deepEqual(openRouterBody.reasoning, { effort: "low" });
+assert.equal(openRouterBody.reasoning_effort, undefined);
+
+// --- Claude CLI seats resolve a rung from their own published ladder ---
+const claudeMember = {
+  provider: "claude",
+  model: "claude-sonnet-5",
+  name: "Sonnet 5",
+  lens: "correctness",
+  effortConfigured: true,
+  effortPosition: 0,
+};
+assert.equal(cliEffortRung(claudeMember), "low");
+assert.equal(cliEffortRung({ ...claudeMember, effortConfigured: false }), undefined);
+// An unpublished model must not send a rung the CLI's own flag would reject.
+assert.equal(cliEffortRung({ ...claudeMember, model: "claude-unknown-9" }), undefined);
+// A non-CLI provider never resolves a CLI rung even with the same ladder.
+assert.equal(cliEffortRung({ ...claudeMember, provider: "openai" }), undefined);
+
 // --- invalid env stays visible on the member ---
 const saved = process.env.CORRECTNESS_EFFORT;
 try {
@@ -80,5 +102,11 @@ try {
   if (saved === undefined) delete process.env.CORRECTNESS_EFFORT;
   else process.env.CORRECTNESS_EFFORT = saved;
 }
+
+// --- an invalid effort must never key the same as unset — a stale cache hit
+// would skip callModel entirely and never surface the parse error ---
+const parseErrorMember = { ...member, effortParseError: "invalid CORRECTNESS_EFFORT: high-ish" };
+assert.notEqual(effortCacheSegment(parseErrorMember), effortCacheSegment(member));
+assert.notEqual(cacheKey(diff, parseErrorMember), cacheKey(diff, member));
 
 console.log("lens effort tests passed");
