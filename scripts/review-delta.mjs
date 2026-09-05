@@ -104,6 +104,14 @@ export function buildFindingsMarkdown(
   return lines.join("\n");
 }
 
+// Telemetry for one council run, from the run's own results — never from the
+// report text. Carried-forward findings reuse old member headings, so parsing
+// the markdown would credit the run with members it never dispatched.
+export function councilRunStats(results) {
+  const list = Array.isArray(results) ? results : [];
+  return { memberCount: list.length, cacheHit: list.some((r) => r?.cached) };
+}
+
 export function buildReviewState(headSha, carry) {
   const encoded = Buffer.from(String(carry || ""), "utf8").toString("base64");
   return `${REVIEW_STATE_MARKER}\nsha:${headSha}\ncarry:${encoded}\n<!-- /vibecodereview:review-state -->`;

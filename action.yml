@@ -281,7 +281,7 @@ runs:
         # it lives under .git/vcr-hooks, outside the working tree `git add -A`
         # walks.
         printf '%s\n' /pr.diff /pr-delta.diff /council-findings.md /council-carry.md /council-carry.next.md /review-state.md /council.log /council.pid \
-          /probe.1 /probe.2 /probe.3 /reason.1 /reason.2 /reason.3 \
+          /probe.1 /probe.2 /probe.3 /reason.1 /reason.2 /reason.3 /council-stats.json \
           >> "$(git rev-parse --git-dir)/info/exclude"
 
         # Keep the chair's evidence complete, but make council member calls
@@ -350,6 +350,8 @@ runs:
         export VCR_MEMBER_DIFF_NOTE="$MEMBER_DIFF_NOTE"
         export VCR_PRIOR_FINDINGS_FILE="$PWD/council-carry.md"
         export VCR_CARRY_FILE="$PWD/council-carry.next.md"
+        export VCR_STATS_FILE="$PWD/council-stats.json"
+        printf 'VCR_STATS_FILE=%s\n' "$VCR_STATS_FILE" >> "$GITHUB_ENV"
         printf '%s\n' /council-carry.next.md >> "$(git rev-parse --git-dir)/info/exclude"
         nohup node "${{ github.action_path }}/scripts/council-review.mjs" \
           pr.diff council-findings.md > council.log 2>&1 &
@@ -656,28 +658,24 @@ runs:
         GITHUB_HEAD_REF: ${{ github.event.pull_request.head.ref }}
         VCR_PR_BODY: ${{ github.event.pull_request.body }}
         VCR_MEMBER_DIFF_NOTE: ${{ env.VCR_MEMBER_DIFF_NOTE }}
+        VCR_STATS_FILE: ${{ env.VCR_STATS_FILE }}
       run: |
         MODE=full
         case "${VCR_MEMBER_DIFF_NOTE:-}" in
           delta*) MODE=delta ;;
         esac
-        MEMBERS=0
-        if [ -f council-findings.md ]; then
-          # grep -c exits 1 (but still prints "0") on zero matches. GitHub's
-          # bash shell runs with `set -eo pipefail`, and a failing command
-          # substitution in an assignment aborts the step right there -- even
-          # inside this `if` body -- which would skip the emit below entirely.
-          # `|| true` keeps the "0" stdout but neutralizes the exit status.
-          MEMBERS=$(grep -cE '^## .+ — .+ lens' council-findings.md 2>/dev/null || true)
-          MEMBERS=${MEMBERS:-0}
-        fi
-        # Anchored to the exact header the engine emits for a cached member
-        # (`## Name — lens lens (cached)`); a bare substring search would also
-        # match a finding that happens to quote that text from the diff.
-        CACHE_HIT=0
-        if [ -f council-findings.md ] && grep -qE '^## .+ lens \(cached\)$' council-findings.md 2>/dev/null; then
-          CACHE_HIT=1
-        fi
+        # Member and cache counts come from the engine's run-stats sidecar,
+        # never from parsing the report: findings carried forward keep their
+        # original `## Name — lens lens` headings (and any `(cached)` suffix),
+        # so grepping the markdown counts members this run never dispatched.
+        # A missing or unreadable sidecar means "no current members": 0 and 0.
+        # Every failure mode below degrades to "0 0", so telemetry can never
+        # fail the step (which also has continue-on-error).
+        STATS="$(node --input-type=module -e 'import fs from "node:fs"; try { const s = JSON.parse(fs.readFileSync(process.env.VCR_STATS_FILE, "utf8")); const m = Number(s.memberCount); if (!Number.isInteger(m) || m < 0) throw new Error("bad memberCount"); console.log(m + " " + (s.cacheHit === true ? "1" : "0")); } catch { console.log("0 0"); }' 2>/dev/null || echo "0 0")"
+        MEMBERS="$(printf '%s' "$STATS" | cut -d' ' -f1)"
+        CACHE_HIT="$(printf '%s' "$STATS" | cut -d' ' -f2)"
+        MEMBERS=${MEMBERS:-0}
+        CACHE_HIT=${CACHE_HIT:-0}
         # `job` is a workflow-job context; composite action steps don't receive
         # it, so `job.status` is always empty here. Read the fan-out step's own
         # outcome instead, the same way the chair steps are checked below.
