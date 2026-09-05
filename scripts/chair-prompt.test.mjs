@@ -31,28 +31,30 @@ assert.ok(prompt.length > 1000, `extracted prompt implausibly short (${prompt.le
 const lenses = [...new Set(DEFAULT_MODELS.map((m) => m.lens))];
 assert.ok(lenses.length >= 2, "roster must have at least two lenses for this guard to mean anything");
 
-// Two or more distinct roster lens names inside one parenthesis is an inventory.
+// An inventory is TWO OR MORE DISTINCT roster lens names anywhere in the prompt.
+//
+// Earlier versions of this guard enumerated the separator between them — first
+// `,`/and/or, then `/ ; | - – — • *`. Each widening was prompted by a reviewer
+// naming one more separator that slipped through, and `&` slipped through the
+// second one. Enumerating separators is unwinnable: the defect is the writer
+// re-typing the roster, and the punctuation between the words is incidental to
+// it. Counting distinct names has no separator to miss, and no formatting
+// (parentheses, a bullet list, a table row, prose) to special-case.
+//
+// One name is allowed, so the prompt can still refer to a single lens if it
+// ever needs to. Two is the point at which prose becomes a list.
 const alternation = lenses.join("|");
-const offenders = [];
-for (const [, inner] of prompt.matchAll(/\(([^()]*)\)/g)) {
-  const hits = new Set((inner.match(new RegExp(`\\b(?:${alternation})\\b`, "gi")) || []).map((w) => w.toLowerCase()));
-  if (hits.size >= 2) offenders.push(inner.replace(/\s+/g, " ").trim());
-}
-// ...as is a bare list of them outside parentheses, whatever the separator —
-// comma, "and"/"or", slash, semicolon, pipe, dash, bullet, or a line break
-// before the next bullet. The failure this guards against (VCR-124) was a
-// hand-typed inventory read as prose; the separator between the words is
-// incidental to that, so the guard must not depend on which one was used.
-const SEPARATOR = String.raw`(?:\s*(?:,|and|or|\/|;|\||-|–|—|•|\*)\s*)`;
-for (const [match] of prompt.matchAll(new RegExp(`\\b(?:${alternation})\\b(?:${SEPARATOR}\\b(?:${alternation})\\b)+`, "gi"))) {
-  offenders.push(match.replace(/\s+/g, " ").trim());
-}
+const named = [
+  ...new Set(
+    (prompt.match(new RegExp(`\\b(?:${alternation})\\b`, "gi")) || []).map((w) => w.toLowerCase()),
+  ),
+];
 
-assert.deepEqual(
-  offenders,
-  [],
-  `chair prompt names lenses inline; the roster is ${lenses.join(", ")} and the findings file already ` +
-    `heads each section with its lens. Drop the list rather than syncing it. Found: ${offenders.join(" | ")}`,
+assert.ok(
+  named.length < 2,
+  `chair prompt names ${named.length} lenses (${named.join(", ")}); the roster is ` +
+    `${lenses.join(", ")} and the findings file already heads each section with its lens. ` +
+    `Drop the list rather than syncing it — syncing postpones the drift instead of removing it.`,
 );
 
 console.log("chair prompt tests passed");
