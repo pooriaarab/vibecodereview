@@ -16,6 +16,7 @@ import {
 import { withMutationMember } from "./council-config.mjs";
 import { buildRequestBody } from "./council-members.mjs";
 import { cacheKey } from "./council-cache.mjs";
+import { claudeCliArgs } from "./claude-cli-seat.mjs";
 
 const member = {
   provider: "openai",
@@ -97,6 +98,23 @@ assert.equal(cliEffortRung({ ...claudeMember, effortConfigured: false }), undefi
 assert.equal(cliEffortRung({ ...claudeMember, model: "claude-unknown-9" }), undefined);
 // A non-CLI provider never resolves a CLI rung even with the same ladder.
 assert.equal(cliEffortRung({ ...claudeMember, provider: "openai" }), undefined);
+
+// --- the configured rung reaches the CLI's own argv, and an unset rung
+// leaves argv exactly as it was before this PR ---
+const cliArgsWithEffort = claudeCliArgs(claudeMember, "review the diff", "low");
+assert.deepEqual(cliArgsWithEffort.slice(-2), ["--effort", "low"]);
+const cliArgsWithoutEffort = claudeCliArgs(claudeMember, "review the diff", undefined);
+assert.equal(cliArgsWithoutEffort.includes("--effort"), false);
+assert.deepEqual(cliArgsWithoutEffort, [
+  "-p",
+  "review the diff",
+  "--model",
+  claudeMember.model,
+  "--allowed-tools",
+  "",
+  "--max-turns",
+  "1",
+]);
 
 // --- invalid env stays visible on the member ---
 const saved = process.env.CORRECTNESS_EFFORT;

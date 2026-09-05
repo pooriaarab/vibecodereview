@@ -1,6 +1,25 @@
 // A Claude subscription seat: there is no OpenAI-compatible URL that accepts a
 // Claude Code OAuth token, so this seat shells the Claude Code CLI the action
 // already installs for the chair instead of POSTing to a chat endpoint.
+
+// Pulled out so the argv it builds — in particular, whether --effort is
+// present at all — can be asserted directly, without stubbing execFile.
+export function claudeCliArgs(model, instructions, effortRung) {
+  return [
+    "-p",
+    instructions,
+    "--model",
+    model.model,
+    // No tools: the seat needs nothing but the diff on stdin. This also
+    // keeps an agentic loop from eating the timeout.
+    "--allowed-tools",
+    "",
+    "--max-turns",
+    "1",
+    ...(effortRung ? ["--effort", effortRung] : []),
+  ];
+}
+
 export async function callClaudeCli(model, diff, oauthToken, { instructions, timeoutMs, effortRung }) {
   const { execFile } = await import("node:child_process");
   const os = await import("node:os");
@@ -38,19 +57,7 @@ export async function callClaudeCli(model, diff, oauthToken, { instructions, tim
   return new Promise((resolve) => {
     const child = execFile(
       "claude",
-      [
-        "-p",
-        instructions,
-        "--model",
-        model.model,
-        // No tools: the seat needs nothing but the diff on stdin. This also
-        // keeps an agentic loop from eating the timeout.
-        "--allowed-tools",
-        "",
-        "--max-turns",
-        "1",
-        ...(effortRung ? ["--effort", effortRung] : []),
-      ],
+      claudeCliArgs(model, instructions, effortRung),
       {
         timeout: timeoutMs,
         maxBuffer: 32 * 1024 * 1024,
