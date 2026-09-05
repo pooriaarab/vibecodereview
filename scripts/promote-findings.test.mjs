@@ -6,6 +6,7 @@ import {
   pairReviewSessions,
   parseTraceLines,
   windowQualifies,
+  runReport,
   LINT_CRITERION,
   DELETE_IDLE_DAYS,
 } from "./promote-findings.mjs";
@@ -123,6 +124,25 @@ function occFromSessions(sessions) {
   ];
   if (occFromSessions(sessions).length !== 0) fail("trivial runs must not contribute evidence");
   else ok("trivial strength skipped — not counted in denominator");
+}
+
+{
+  const sessions = [
+    session({ pr: 1, ts: "2026-08-01T00:00:00Z", id: "g1", disposition: "confirmed-open" }),
+    session({ pr: 2, ts: "2026-08-10T00:00:00Z", id: "g2", disposition: "confirmed-open" }),
+    session({ pr: 3, ts: "2026-08-20T00:00:00Z", id: "g3", disposition: "confirmed-open" }),
+  ];
+  const stubSearch = () => [{ number: 42, createdAt: "2026-08-01T00:00:00Z", state: "OPEN", body: "" }];
+  const { report } = runReport({
+    repo: "o/r",
+    traces: buildTrace(sessions),
+    live: true,
+    now: "2026-08-25T00:00:00Z",
+    searchFn: stubSearch,
+  });
+  if (!report.includes("#42 (OPEN)")) {
+    fail("live mode fetched issues but the report text never surfaces them");
+  } else ok("live mode's filed issues appear in the formatted report");
 }
 
 // Decorative guard: any new check must stay ABOVE this line (see AGENTS / issue #129).

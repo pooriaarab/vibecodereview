@@ -210,6 +210,9 @@ export function formatReport(repo, analysis) {
       lines.push(`- \`${e.classKey.slice(0, 12)}…\` — ${e.distinctPrs} PRs, strength ${JSON.stringify(e.strength)}`);
       lines.push(`  Recommend rank ${e.rank.rank}: ${e.rank.mechanism} — ${e.rank.why}`);
       if (e.rank.rank === 3) lines.push("  WARNING: rank 3 not allowed here; use prose path instead.");
+      if (Array.isArray(e.issues) && e.issues.length) {
+        lines.push(`  Filed: ${e.issues.map((i) => `#${i.number} (${i.state})`).join(", ")}`);
+      }
     }
     lines.push("");
   } else {
@@ -221,6 +224,9 @@ export function formatReport(repo, analysis) {
     for (const e of analysis.proseEarned) {
       lines.push(`- \`${e.classKey.slice(0, 12)}…\` — strength ${JSON.stringify(e.strength)}`);
       lines.push(`  Recommend rank 3 only: ${e.rank.mechanism}`);
+      if (Array.isArray(e.issues) && e.issues.length) {
+        lines.push(`  Filed: ${e.issues.map((i) => `#${i.number} (${i.state})`).join(", ")}`);
+      }
     }
     lines.push("");
   }
