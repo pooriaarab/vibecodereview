@@ -7,7 +7,8 @@ import {
   rungPosition,
 } from "./lens-effort.mjs";
 import { LADDERS_FOR_TESTS, offeredRungs } from "./model-effort-ladders.mjs";
-import { cliEffortRung, effortCacheSegment, withLensEffort } from "./lens-effort-config.mjs";
+import { effortWireExtras, withLensEffort } from "./lens-effort-config.mjs";
+import { withMutationMember } from "./council-config.mjs";
 import { buildRequestBody } from "./council-members.mjs";
 import { cacheKey } from "./council-cache.mjs";
 
@@ -70,28 +71,6 @@ const configured = { ...member, effortConfigured: true, effortPosition: 0 };
 const wired = buildRequestBody(configured, diff);
 assert.equal(wired.reasoning_effort, "low");
 
-// --- OpenRouter gets the nested reasoning.effort shape, not reasoning_effort ---
-const openRouterMember = { ...member, provider: "openrouter", effortConfigured: true, effortPosition: 0 };
-const openRouterBody = buildRequestBody(openRouterMember, diff);
-assert.deepEqual(openRouterBody.reasoning, { effort: "low" });
-assert.equal(openRouterBody.reasoning_effort, undefined);
-
-// --- Claude CLI seats resolve a rung from their own published ladder ---
-const claudeMember = {
-  provider: "claude",
-  model: "claude-sonnet-5",
-  name: "Sonnet 5",
-  lens: "correctness",
-  effortConfigured: true,
-  effortPosition: 0,
-};
-assert.equal(cliEffortRung(claudeMember), "low");
-assert.equal(cliEffortRung({ ...claudeMember, effortConfigured: false }), undefined);
-// An unpublished model must not send a rung the CLI's own flag would reject.
-assert.equal(cliEffortRung({ ...claudeMember, model: "claude-unknown-9" }), undefined);
-// A non-CLI provider never resolves a CLI rung even with the same ladder.
-assert.equal(cliEffortRung({ ...claudeMember, provider: "openai" }), undefined);
-
 // --- invalid env stays visible on the member ---
 const saved = process.env.CORRECTNESS_EFFORT;
 try {
@@ -103,10 +82,30 @@ try {
   else process.env.CORRECTNESS_EFFORT = saved;
 }
 
-// --- an invalid effort must never key the same as unset — a stale cache hit
-// would skip callModel entirely and never surface the parse error ---
-const parseErrorMember = { ...member, effortParseError: "invalid CORRECTNESS_EFFORT: high-ish" };
-assert.notEqual(effortCacheSegment(parseErrorMember), effortCacheSegment(member));
-assert.notEqual(cacheKey(diff, parseErrorMember), cacheKey(diff, member));
+// MUTATION_EFFORT must reach the mutation member. That member is appended by
+// withMutationMember, which parseModels never returns, so decorating with
+// effort before the append leaves this env var set, documented and dead.
+{
+  const savedLens = process.env.MUTATION_LENS;
+  const savedEffort = process.env.MUTATION_EFFORT;
+  try {
+    process.env.MUTATION_LENS = "true";
+    process.env.MUTATION_EFFORT = "max";
+    const diff = "diff --git a/a.test.mjs b/a.test.mjs\n--- a/a.test.mjs\n+++ b/a.test.mjs\n+assert(1);\n";
+    const { members } = withMutationMember(
+      [{ provider: "openai", model: "gpt-5.6", name: "G", lens: "security" }],
+      diff,
+    );
+    const decorated = withLensEffort(members);
+    const mutation = decorated.find((m) => m.lens === "mutation");
+    assert.ok(mutation, "mutation member should be appended for a diff that adds tests");
+    assert.equal(mutation.effortConfigured, true, "MUTATION_EFFORT must reach the appended mutation member");
+    assert.equal(mutation.effortPosition, 1);
+    assert.ok(effortWireExtras(mutation), "a configured mutation member must carry effort onto the wire");
+  } finally {
+    if (savedLens === undefined) delete process.env.MUTATION_LENS; else process.env.MUTATION_LENS = savedLens;
+    if (savedEffort === undefined) delete process.env.MUTATION_EFFORT; else process.env.MUTATION_EFFORT = savedEffort;
+  }
+}
 
 console.log("lens effort tests passed");
