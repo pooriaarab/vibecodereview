@@ -21,6 +21,16 @@ function patternsForLens(pathFilter, lens) {
   return Array.isArray(patterns) ? patterns.filter((pattern) => typeof pattern === "string") : [];
 }
 
+/** Count `+` lines in a unified diff (denominator for finding recurrence). */
+export function countAddedLines(diff) {
+  let count = 0;
+  for (const line of String(diff || "").split("\n")) {
+    if (line.startsWith("+++") || line.startsWith("---")) continue;
+    if (line.startsWith("+")) count += 1;
+  }
+  return count;
+}
+
 export function diffPaths(diff) {
   const paths = [];
   for (const line of String(diff || "").split("\n")) {

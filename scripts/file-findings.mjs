@@ -35,6 +35,24 @@ export function fingerprint(location, text) {
   return crypto.createHash('sha256').update(normal).digest('hex').slice(0, 16);
 }
 
+// First clause before the arrow — shared by buildTitle and classKey so jscpd
+// does not flag a second cut.
+export function stemText(text) {
+  return String(text || '').split(/->|—|\.\s|;/)[0].trim().replace(/[.,:;]$/, '');
+}
+
+// Lens token from a model heading, e.g. "GPT — correctness lens" -> "correctness".
+export function extractLensFamily(heading) {
+  const match = /—\s*(\w+)\s*lens/i.exec(String(heading || ''));
+  return match ? match[1].toLowerCase() : String(heading || '').toLowerCase();
+}
+
+export function buildClassKey(lensFamily, path, text) {
+  const stem = stemText(text).toLowerCase().replace(/\s+/g, ' ').trim();
+  const normal = `${lensFamily}|${path}|${stem}`;
+  return crypto.createHash('sha256').update(normal).digest('hex');
+}
+
 export function parseFindings(markdown) {
   const findings = [];
   let lens = null;
@@ -54,9 +72,34 @@ export function parseFindings(markdown) {
     // The council is asked to name a concrete trigger. A line without one is
     // not a finding, and `path:line` is the shape that carries it.
     if (!/:\d+/.test(location) && !location.includes('/')) continue;
-    findings.push({ location, text, lens, id: fingerprint(location, text) });
+    const path = location.split(':')[0];
+    const lensFamily = extractLensFamily(lens);
+    findings.push({
+      location,
+      text,
+      lens,
+      lensFamily,
+      path,
+      id: fingerprint(location, text),
+      classKey: buildClassKey(lensFamily, path, text),
+    });
   }
   return findings;
+}
+
+/** Machine-readable finding keys for the chair verdict file. */
+export function findingsMetaBlock(findings) {
+  const payload = findings.map((f) => ({
+    id: f.id,
+    classKey: f.classKey,
+    path: f.path,
+    lens: f.lensFamily,
+  }));
+  return `\n<!-- vibetrace:findings-meta\n${JSON.stringify(payload)}\n-->\n`;
+}
+
+export function appendFindingsMeta(markdown) {
+  return `${String(markdown || '').trimEnd()}${findingsMetaBlock(parseFindings(markdown))}`;
 }
 
 // The council says this in so many words when it has nothing.
@@ -91,7 +134,7 @@ export function alreadyFiled(repo, id) {
 // leaves a title severed mid-phrase, so drop whole words until it fits and fall
 // back to the file name when the clause carries nothing usable.
 export function buildTitle(finding, path) {
-  const clause = finding.text.split(/->|—|\.\s|;/)[0].trim().replace(/[.,:;]$/, '');
+  const clause = stemText(finding.text);
   const file = String(path || '').split('/').pop() || 'the reported defect';
   let subject = clause.charAt(0).toLowerCase() + clause.slice(1);
   while (subject.length > 46 && subject.includes(' ')) {

@@ -280,7 +280,7 @@ runs:
         # The commit-trailer hook from "Configure git" needs no entry here:
         # it lives under .git/vcr-hooks, outside the working tree `git add -A`
         # walks.
-        printf '%s\n' /pr.diff /pr-delta.diff /council-findings.md /council-carry.md /council-carry.next.md /review-state.md /council.log /council.pid \
+        printf '%s\n' /pr.diff /pr-delta.diff /council-findings.md /council-carry.md /council-carry.next.md /review-state.md /council.log /council.pid /chair-verdicts.json \
           /probe.1 /probe.2 /probe.3 /reason.1 /reason.2 /reason.3 \
           >> "$(git rev-parse --git-dir)/info/exclude"
 
@@ -496,6 +496,13 @@ runs:
            `<details><summary>🧑‍⚖️ Council</summary>` then a Markdown table of
            `| Model | Lens | Result |` (confirmed / rejected / no findings), then `</details>`.
            If council was skipped, write "Council: skipped".
+        8. Write `chair-verdicts.json` beside `council-findings.md`. Read the
+           `<!-- vibetrace:findings-meta -->` block at the end of
+           `council-findings.md` for each finding's `id` and `classKey`. Emit
+           one disposition per finding: `confirmed-fixed`, `confirmed-open`,
+           `rejected`, or `unmentioned`. Schema:
+           `{"verdict":"approve"|"request-changes"|"comment","dispositions":[{"id","classKey","disposition"}]}`
+           Match your `gh pr review` verdict to `verdict`.
         VCR_PROMPT_EOF
         # The heredoc is quoted so the prompt stays literal (it contains
         # backticks and $ that must not be expanded). Fill the run's values in
@@ -685,8 +692,11 @@ runs:
         if [ "${{ steps.council_await.outcome }}" = "cancelled" ]; then
           CANCELLED=1
         fi
+        DIFF_FILE=pr-delta.diff
+        [ -f "$DIFF_FILE" ] || DIFF_FILE=pr.diff
         node "${{ github.action_path }}/scripts/vibetrace-emit.mjs" review.council \
-          --mode "$MODE" --cache-hit "$CACHE_HIT" --members "$MEMBERS" --cancelled "$CANCELLED"
+          --mode "$MODE" --cache-hit "$CACHE_HIT" --members "$MEMBERS" --cancelled "$CANCELLED" \
+          --findings council-findings.md --diff "$DIFF_FILE"
 
     # Failover chain: each attempt runs the SAME prompt (built once above) with
     # a different subscription. Every attempt costs ~10s of setup even when the
@@ -935,6 +945,22 @@ runs:
         echo "Most often: the pull request edits .github/workflows/vibecodereview.yml, and"
         echo "claude-code-action refuses to run when the workflow differs from the default branch."
         exit 1
+
+    # Observability only. Silent-fail inside the script. Never gates the review.
+    - name: Emit vibetrace review.chair
+      if: always() && steps.budget.outputs.over != 'true'
+      continue-on-error: true
+      shell: bash
+      env:
+        VIBETRACE_INGEST_URL: ${{ inputs.vibetrace_ingest_url }}
+        VIBETRACE_INGEST_TOKEN: ${{ inputs.vibetrace_ingest_token }}
+        GITHUB_REPOSITORY: ${{ github.repository }}
+        VCR_PR: ${{ github.event.pull_request.number }}
+        GITHUB_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        VCR_PR_BODY: ${{ github.event.pull_request.body }}
+      run: |
+        node "${{ github.action_path }}/scripts/vibetrace-emit.mjs" review.chair \
+          --verdicts chair-verdicts.json
 
     # Persist the review boundary and the findings that still need a chair's
     # verification. Updating one hidden comment avoids adding visible noise to
