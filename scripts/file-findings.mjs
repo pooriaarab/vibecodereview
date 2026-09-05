@@ -98,6 +98,32 @@ export function findingsMetaBlock(findings) {
   return `\n<!-- vibetrace:findings-meta\n${JSON.stringify(payload)}\n-->\n`;
 }
 
+/**
+ * Read back the ids the council actually recorded. The chair's verdict file is
+ * checked against these: a disposition set that omits, duplicates or invents an
+ * id is not a complete verdict, and recording it as one is how an unverified
+ * claim reaches the promotion counter.
+ *
+ * `appendFindingsMeta` always appends the real block last, after every member's
+ * raw (unsanitized) text. A member echoes back whatever the diff under review
+ * fed it, so a diff that prompt-injects the literal marker into a member's
+ * response would plant an earlier, forged block -- matching the first
+ * occurrence in the file would read that one instead. Anchoring to the end of
+ * the string only accepts the block the trusted `write()` path itself appended.
+ * @returns {string[] | null} ids, or null when no meta block is present
+ */
+export function parseFindingsMeta(markdown) {
+  const match = /<!-- vibetrace:findings-meta\n([\s\S]*?)\n-->\s*$/.exec(String(markdown || ''));
+  if (!match) return null;
+  try {
+    const parsed = JSON.parse(match[1]);
+    if (!Array.isArray(parsed)) return null;
+    return parsed.map((f) => f?.id).filter((id) => typeof id === 'string' && id);
+  } catch {
+    return null;
+  }
+}
+
 export function appendFindingsMeta(markdown) {
   return `${String(markdown || '').trimEnd()}${findingsMetaBlock(parseFindings(markdown))}`;
 }

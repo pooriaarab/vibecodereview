@@ -80,7 +80,7 @@ inputs:
     required: false
     default: ""
   vibetrace_ingest_url:
-    description: "Optional POST endpoint for vibetrace review.council records. When unset, the emit step writes JSONL under RUNNER_TEMP and never fails the review."
+    description: "Optional POST endpoint for vibetrace review.council and review.chair records. When unset, the emit step writes JSONL under RUNNER_TEMP and never fails the review."
     required: false
     default: ""
   vibetrace_ingest_token:
@@ -112,6 +112,7 @@ runs:
       run: |
         git config user.name "vibecodereview[bot]"
         git config user.email "vibecodereview@users.noreply.github.com"
+
 
         # Strip a model trailer from every commit this run makes.
         #
@@ -352,6 +353,13 @@ runs:
         export VCR_CARRY_FILE="$PWD/council-carry.next.md"
         export VCR_STATS_FILE="$PWD/council-stats.json"
         printf 'VCR_STATS_FILE=%s\n' "$VCR_STATS_FILE" >> "$GITHUB_ENV"
+        # The chair's verdicts live OUTSIDE the checkout. A path in the workspace
+        # is the PR's own tree: a pull request could commit a file there and have
+        # it read back as this run's real verdict, and deleting it first is worse
+        # still — `git add -A` in a later self-heal commit stages that deletion
+        # and erases whatever the PR tracked at that path. RUNNER_TEMP can hold
+        # neither problem, because no PR content ever reaches it.
+        printf 'VCR_CHAIR_VERDICTS=%s\n' "$RUNNER_TEMP/chair-verdicts.json" >> "$GITHUB_ENV"
         printf '%s\n' /council-carry.next.md >> "$(git rev-parse --git-dir)/info/exclude"
         nohup node "${{ github.action_path }}/scripts/council-review.mjs" \
           pr.diff council-findings.md > council.log 2>&1 &
@@ -494,6 +502,20 @@ runs:
            not trigger workflows for GITHUB_TOKEN pushes, so no later run posts the
            approval that would supersede the block. Only a human dismissing the review
            can. See issue #43.
+        6c. Before posting your review, Write your verdicts file to the ABSOLUTE path in the
+           `VCR_CHAIR_VERDICTS` environment variable (it points outside the repository, so it
+           can never collide with a file this pull request tracks). Give it your verdict and
+           one disposition per council finding. Read the `<!-- vibetrace:findings-meta` block at the end of
+           `council-findings.md` for finding ids. JSON shape:
+             {
+               "verdict": "approve" | "comment" | "request-changes",
+               "dispositions": [
+                 { "id": "<finding id>", "disposition": "confirmed-fixed" | "confirmed-open" | "rejected" | "unmentioned" }
+               ]
+             }
+           Use `confirmed-fixed` when you fixed it this run, `confirmed-open` when you verified
+           it and it remains open, `rejected` when you discarded it, `unmentioned` when you did
+           not address it. Include every id from findings-meta; the verdict must match step 6.
         7. In the review body include a collapsible council table:
            `<details><summary>🧑‍⚖️ Council</summary>` then a Markdown table of
            `| Model | Lens | Result |` (confirmed / rejected / no findings), then `</details>`.
@@ -724,6 +746,22 @@ runs:
         prompt: ${{ steps.prompt.outputs.text }}
         claude_args: '--allowed-tools "Bash(gh api:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr review:*),Bash(gh pr comment:*),Bash(git:*),Bash(jq:*),Bash(cat:*),Bash(ls:*),Bash(head:*),Bash(wc:*),Read,Glob,Grep,Edit,Write,TodoWrite"'
 
+    # A chair attempt writes chair-verdicts.json BEFORE it posts (step 6c
+    # precedes step 7 in the prompt), so an attempt that crashes or times out
+    # in between can leave that file behind despite never posting a review.
+    # Nothing else clears it, and the final emit step trusts whatever file is
+    # on disk when it runs -- so without this, a stale verdict from a chair
+    # that never posted gets misattributed to whichever later attempt (down
+    # to the no-Write OpenRouter fallback) actually posts the real review.
+    # One cleanup precedes each attempt below, gated on the same condition
+    # that already decides whether that attempt runs, so a still-running
+    # earlier success (which skips every later attempt) is never touched.
+    - name: Clear stale chair-verdicts.json before backup attempt
+      if: steps.budget.outputs.over != 'true' && steps.chair_primary.outcome != 'success'
+      continue-on-error: true
+      shell: bash
+      run: rm -f "$VCR_CHAIR_VERDICTS"
+
     - name: Chair review (backup token)
       id: chair_backup
       if: steps.budget.outputs.over != 'true' && steps.chair_primary.outcome != 'success' && steps.chair_probe.outputs.token_2 != 'dead' && inputs.claude_code_oauth_token_2 != ''
@@ -735,6 +773,12 @@ runs:
         allowed_bots: "*"
         prompt: ${{ steps.prompt.outputs.text }}
         claude_args: '--allowed-tools "Bash(gh api:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr review:*),Bash(gh pr comment:*),Bash(git:*),Bash(jq:*),Bash(cat:*),Bash(ls:*),Bash(head:*),Bash(wc:*),Read,Glob,Grep,Edit,Write,TodoWrite"'
+
+    - name: Clear stale chair-verdicts.json before third attempt
+      if: steps.budget.outputs.over != 'true' && steps.chair_primary.outcome != 'success' && steps.chair_backup.outcome != 'success'
+      continue-on-error: true
+      shell: bash
+      run: rm -f "$VCR_CHAIR_VERDICTS"
 
     - name: Chair review (third token)
       id: chair_third
@@ -748,6 +792,12 @@ runs:
         prompt: ${{ steps.prompt.outputs.text }}
         claude_args: '--allowed-tools "Bash(gh api:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr review:*),Bash(gh pr comment:*),Bash(git:*),Bash(jq:*),Bash(cat:*),Bash(ls:*),Bash(head:*),Bash(wc:*),Read,Glob,Grep,Edit,Write,TodoWrite"'
 
+    - name: Clear stale chair-verdicts.json before fourth attempt
+      if: steps.budget.outputs.over != 'true' && steps.chair_primary.outcome != 'success' && steps.chair_backup.outcome != 'success' && steps.chair_third.outcome != 'success'
+      continue-on-error: true
+      shell: bash
+      run: rm -f "$VCR_CHAIR_VERDICTS"
+
     - name: Chair review (fourth token)
       id: chair_fourth
       if: steps.budget.outputs.over != 'true' && steps.chair_primary.outcome != 'success' && steps.chair_backup.outcome != 'success' && steps.chair_third.outcome != 'success' && steps.chair_probe.outputs.token_4 != 'dead' && inputs.claude_code_oauth_token_4 != ''
@@ -759,6 +809,23 @@ runs:
         allowed_bots: "*"
         prompt: ${{ steps.prompt.outputs.text }}
         claude_args: '--allowed-tools "Bash(gh api:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr review:*),Bash(gh pr comment:*),Bash(git:*),Bash(jq:*),Bash(cat:*),Bash(ls:*),Bash(head:*),Bash(wc:*),Read,Glob,Grep,Edit,Write,TodoWrite"'
+
+    # This one matters most: the fallback has no Write tool (it is a single
+    # completion call, not an agentic loop), so it can never overwrite a
+    # stale file itself. Without this cleanup, a stale verdict left by a
+    # crashed full-tool attempt would ride along into the emit step and be
+    # reported as the verdict behind the fallback's own, differently-reasoned
+    # review.
+    - name: Clear stale chair-verdicts.json before fallback
+      if: >-
+        steps.budget.outputs.over != 'true' &&
+        steps.chair_primary.outcome != 'success' &&
+        steps.chair_backup.outcome != 'success' &&
+        steps.chair_third.outcome != 'success' &&
+        steps.chair_fourth.outcome != 'success'
+      continue-on-error: true
+      shell: bash
+      run: rm -f "$VCR_CHAIR_VERDICTS"
 
     # Surface the true result: green if any chair run succeeded; red if they all
     # failed. Without this, continue-on-error would mask a genuine failure as
@@ -936,6 +1003,23 @@ runs:
         echo "Most often: the pull request edits .github/workflows/vibecodereview.yml, and"
         echo "claude-code-action refuses to run when the workflow differs from the default branch."
         exit 1
+
+    # Observability only. Silent-fail inside the script. Never gates the review.
+    - name: Emit vibetrace review.chair
+      if: always() && steps.budget.outputs.over != 'true'
+      continue-on-error: true
+      shell: bash
+      env:
+        VIBETRACE_INGEST_URL: ${{ inputs.vibetrace_ingest_url }}
+        VIBETRACE_INGEST_TOKEN: ${{ inputs.vibetrace_ingest_token }}
+        GITHUB_REPOSITORY: ${{ github.repository }}
+        VCR_PR: ${{ github.event.pull_request.number }}
+        GITHUB_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        VCR_PR_BODY: ${{ github.event.pull_request.body }}
+      run: |
+        node "${{ github.action_path }}/scripts/vibetrace-emit.mjs" review.chair \
+          --verdicts "$VCR_CHAIR_VERDICTS" \
+          --findings council-findings.md
 
     # Persist the review boundary and the findings that still need a chair's
     # verification. Updating one hidden comment avoids adding visible noise to

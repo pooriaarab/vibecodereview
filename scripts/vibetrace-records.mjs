@@ -1,8 +1,9 @@
 // vibetrace record builders — council cost/routing plus defect measurement.
-import { parseFindings } from "./file-findings.mjs";
+import { parseChairVerdictsJson, verifyDispositionCoverage } from "./chair-verdicts.mjs";
+import { parseFindings, parseFindingsMeta } from "./file-findings.mjs";
 import { countAddedLines } from "./review-delta.mjs";
 
-export const SCHEMA_VERSION = "0.2.0";
+export const SCHEMA_VERSION = "0.3.0";
 
 // The prefix every skip path writes. Matching it is what keeps a skipped
 // review out of the `full` bucket; the table below only refines WHICH skip.
@@ -104,6 +105,61 @@ export function buildCouncilRecord(input) {
       addedLines: countAddedLines(diffMarkdown),
       findings: councilFindingsPayload(findingsMarkdown),
       attribution,
+    },
+  };
+}
+
+/**
+ * @param {{
+ *   attribution: Record<string, unknown>,
+ *   verdictsJson?: string,
+ *   verdictsMissing?: boolean,
+ * }} input
+ */
+export function buildChairRecord(input) {
+  const { attribution, verdictsJson, verdictsMissing = false, findingsMarkdown } = input;
+  const base = {
+    schemaVersion: SCHEMA_VERSION,
+    ts: new Date().toISOString(),
+    type: "review.chair",
+    attribution,
+  };
+  if (verdictsMissing || verdictsJson === undefined) {
+    return {
+      ok: true,
+      record: { ...base, dispositionsMissing: true },
+    };
+  }
+  const parsed = parseChairVerdictsJson(verdictsJson);
+  if (!parsed.ok) {
+    return {
+      ok: true,
+      record: { ...base, dispositionsMissing: true },
+    };
+  }
+  // A well-formed file is not the same as a complete one. Cross-check the ids
+  // against what the council actually recorded: a set that omits, duplicates or
+  // invents a finding is not a verdict on this run, and recording it with
+  // dispositionsMissing:false would hand the promotion counter a claim no chair
+  // made. `coverageUnverified` marks the case where the report carried no meta
+  // block to check against, so a reader can tell "checked and complete" from
+  // "nothing to check".
+  const knownIds = findingsMarkdown === undefined ? null : parseFindingsMeta(findingsMarkdown);
+  const coverage = verifyDispositionCoverage(parsed.dispositions, knownIds);
+  if (!coverage.ok) {
+    return {
+      ok: true,
+      record: { ...base, dispositionsMissing: true, dispositionsRejected: coverage.reason },
+    };
+  }
+  return {
+    ok: true,
+    record: {
+      ...base,
+      dispositionsMissing: false,
+      verdict: parsed.verdict,
+      dispositions: parsed.dispositions,
+      coverageUnverified: knownIds === null,
     },
   };
 }

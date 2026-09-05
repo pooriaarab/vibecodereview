@@ -4,7 +4,9 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { appendFindingsMeta, parseFindingsMeta } from "./file-findings.mjs";
 import {
+  buildChairRecord,
   buildCouncilRecord,
   detectStrength,
 } from "./vibetrace-records.mjs";
@@ -134,6 +136,90 @@ fs.rmSync(tmp, { recursive: true, force: true });
     failed++;
   } else {
     console.log("ok - a quoted skip marker is content, an anchored one is a skip");
+  }
+}
+
+// --- review.chair: missing verdicts must not look like zero findings ----------
+{
+  const missing = buildChairRecord({ attribution: {}, verdictsMissing: true });
+  if (!missing.ok || missing.record.dispositionsMissing !== true) {
+    console.error("FAIL missing verdicts must set dispositionsMissing", missing.record);
+    failed++;
+  } else if ("dispositions" in missing.record || "verdict" in missing.record) {
+    console.error("FAIL missing verdicts must not include dispositions or verdict", missing.record);
+    failed++;
+  } else {
+    console.log("ok - missing chair-verdicts.json sets dispositionsMissing without zero findings");
+  }
+
+  const validJson = JSON.stringify({
+    verdict: "comment",
+    dispositions: [
+      { id: "abc123", disposition: "confirmed-fixed" },
+      { id: "def456", disposition: "rejected" },
+    ],
+  });
+  const present = buildChairRecord({ attribution: {}, verdictsJson: validJson });
+  if (!present.ok || present.record.dispositionsMissing !== false) {
+    console.error("FAIL valid verdicts must clear dispositionsMissing", present.record);
+    failed++;
+  } else if (present.record.verdict !== "comment" || present.record.dispositions?.length !== 2) {
+    console.error("FAIL valid verdicts shape", present.record);
+    failed++;
+  } else {
+    console.log("ok - valid chair-verdicts.json parses into dispositions");
+  }
+
+  const malformed = buildChairRecord({ attribution: {}, verdictsJson: "{ not json" });
+  if (!malformed.ok || malformed.record.dispositionsMissing !== true) {
+    console.error("FAIL malformed verdicts must set dispositionsMissing", malformed.record);
+    failed++;
+  } else if ("dispositions" in malformed.record) {
+    console.error("FAIL malformed verdicts must not include dispositions array", malformed.record);
+    failed++;
+  } else {
+    console.log("ok - malformed chair-verdicts.json fails open with dispositionsMissing");
+  }
+}
+
+// A well-formed verdict file is not a complete one. A set that omits,
+// duplicates or invents a finding id is not a verdict on this run, and
+// recording it with dispositionsMissing:false hands the promotion counter a
+// claim no chair made.
+{
+  const report = appendFindingsMeta(
+    "## GPT — security lens\n\n- `a.ts:1` — bad -> fix.\n- `b.ts:2` — worse -> fix.\n",
+  );
+  const ids = parseFindingsMeta(report);
+  const body = (ds) => JSON.stringify({ verdict: "comment", dispositions: ds });
+  const rec = (ds, md = report) =>
+    buildChairRecord({ verdictsJson: body(ds), findingsMarkdown: md, attribution: {} }).record;
+  const all = ids.map((id) => ({ id, disposition: "confirmed-open" }));
+
+  const complete = rec(all);
+  if (complete.dispositionsMissing !== false || complete.coverageUnverified !== false) {
+    console.error("FAIL a complete disposition set must be trusted", complete);
+    failed++;
+  }
+  for (const [label, ds] of [
+    ["omits a finding", [all[0]]],
+    ["duplicates a finding", [all[0], { id: ids[0], disposition: "rejected" }, all[1]]],
+    ["invents a finding", [...all, { id: "forged", disposition: "confirmed-fixed" }]],
+  ]) {
+    const r = rec(ds);
+    if (r.dispositionsMissing !== true || !r.dispositionsRejected) {
+      console.error(`FAIL a set that ${label} must not be recorded as a complete verdict`, r);
+      failed++;
+    }
+  }
+  // No meta block means nothing to check against, not a failure — but the
+  // reader must be able to tell that apart from a verified set.
+  const unchecked = rec([{ id: "x", disposition: "confirmed-open" }], "## x\n");
+  if (unchecked.dispositionsMissing !== false || unchecked.coverageUnverified !== true) {
+    console.error("FAIL an unverifiable set must be flagged, not failed", unchecked);
+    failed++;
+  } else {
+    console.log("ok - disposition coverage is checked against the recorded findings");
   }
 }
 
