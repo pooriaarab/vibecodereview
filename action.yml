@@ -33,7 +33,7 @@ inputs:
     description: "OpenRouter key — cheap leftover members (DeepSeek/GLM). Not Claude, Codex, or Grok. Omit to drop it."
     required: false
   chair_fallback_model:
-    description: "Model for the OpenRouter fallback chair, used only when every Claude OAuth token fails. Must be a cheap leftover id (default deepseek/deepseek-v4-flash). Claude, Codex, and Grok ids are refused before the HTTP call. Omit openrouter_api_key to disable the fallback entirely."
+    description: "Model for the OpenRouter fallback chair, used only when no Claude chair step posted a review. Must be a cheap leftover id (default deepseek/deepseek-v4-flash). Claude, Codex, and Grok ids are refused before the HTTP call. Omit openrouter_api_key to disable the fallback entirely."
     required: false
     default: "deepseek/deepseek-v4-flash"
   council_models:
@@ -584,9 +584,13 @@ runs:
     # that could not succeed.
     #
     # The probe runs the SAME CLI the action runs, with the same token, so it is
-    # faithful by construction: a dead token returns the documented signature
-    # (is_error true, num_turns 1, total_cost_usd 0, empty modelUsage). The four
-    # probes run concurrently, so the cost is one probe (~1-4s), not four.
+    # faithful by construction for ONE question only: did this token return the
+    # documented dead signature (is_error true, num_turns 1, total_cost_usd 0,
+    # empty modelUsage)? It does NOT answer whether a full chair attempt will
+    # succeed — a token can authenticate here and still fail the chair (usage
+    # cap, workflow skip, timeout). Never log or infer chair failure from probe
+    # liveness alone. The four probes run concurrently, so the cost is one
+    # probe (~1-4s), not four.
     #
     # It FAILS OPEN. Only that exact signature prunes an attempt. A timeout, a
     # crash, a parse failure or any unexpected output leaves the attempt in
@@ -645,7 +649,7 @@ runs:
           v="$(cat "probe.$s" 2>/dev/null || echo live)"
           [ "$v" = "dead" ] || v="live"
           echo "token_${s}=$v" >> "$GITHUB_OUTPUT"
-          echo "chair token $s: $v"
+          echo "probe token $s: $v (auth signature only — does not predict chair success)"
           [ "$v" = "dead" ] && cat "reason.$s" 2>/dev/null
           true
         done
@@ -833,8 +837,8 @@ runs:
     # failed. Without this, continue-on-error would mask a genuine failure as
     # success. A chair that dies in ~0.5s at $0 cost with one turn is a dead
     # token, not a bad review — check the subscription before the prompt.
-    # Last resort. Every Claude token has failed, so the choice is between a
-    # weaker review and none at all. On 2026-08-27 both subscriptions capped out
+    # Last resort when no Claude chair step posted a review. The choice is
+    # between a weaker review and none at all. On 2026-08-27 both subscriptions capped out
     # at once and the whole fleet lost its review for days — a Claude-only chair
     # makes one vendor's quota a single point of failure for every repo.
     - name: Chair fallback (OpenRouter)
@@ -860,6 +864,14 @@ runs:
         PR_CONTEXT_FILE: ${{ runner.temp }}/pr-context.txt
         VCR_REQUIRE_PROOF: ${{ inputs.require_proof }}
         VCR_REVIEW_HEAD_SHA: ${{ env.VCR_REVIEW_HEAD_SHA }}
+        VCR_PROBE_TOKEN_1: ${{ steps.chair_probe.outputs.token_1 }}
+        VCR_PROBE_TOKEN_2: ${{ steps.chair_probe.outputs.token_2 }}
+        VCR_PROBE_TOKEN_3: ${{ steps.chair_probe.outputs.token_3 }}
+        VCR_PROBE_TOKEN_4: ${{ steps.chair_probe.outputs.token_4 }}
+        VCR_CHAIR_PRIMARY_OUTCOME: ${{ steps.chair_primary.outcome }}
+        VCR_CHAIR_BACKUP_OUTCOME: ${{ steps.chair_backup.outcome }}
+        VCR_CHAIR_THIRD_OUTCOME: ${{ steps.chair_third.outcome }}
+        VCR_CHAIR_FOURTH_OUTCOME: ${{ steps.chair_fourth.outcome }}
       run: node "${{ github.action_path }}/scripts/chair-fallback.mjs" pr.diff council-findings.md
 
     # A completed chair review no longer needs the per-member cache comments;
@@ -994,13 +1006,30 @@ runs:
           echo "::warning::primary Claude subscription token is dead (probe: token_1=$TOKEN_1 token_2=$TOKEN_2 token_3=$TOKEN_3 token_4=$TOKEN_4); this run is on a backup token"
         fi
 
+        probe_line="probe: token_1=$TOKEN_1 token_2=$TOKEN_2 token_3=$TOKEN_3 token_4=$TOKEN_4"
+        steps_line="chair steps: primary=$P backup=$B third=$T fourth=$Q fallback=$F"
+
         if [ "$posted" -gt 0 ]; then
-          echo "chair: $claimed posted $posted review(s) this run"
+          echo "$probe_line"
+          if [ "$claimed" = "fallback" ]; then
+            echo "$steps_line"
+            live_seen=false
+            for t in "$TOKEN_1" "$TOKEN_2" "$TOKEN_3" "$TOKEN_4"; do
+              [ "$t" = "live" ] && live_seen=true
+            done
+            if [ "$live_seen" = "false" ]; then
+              echo "chair: all probed Claude tokens dead; OpenRouter fallback posted the review"
+            else
+              echo "chair: no Claude chair posted a review ($steps_line; probe auth-only and may disagree with chair); OpenRouter fallback posted the review"
+            fi
+          else
+            echo "chair: $claimed posted $posted review(s) this run ($steps_line)"
+          fi
           exit 0
         fi
 
         echo "chair posted no review this run (claimed=$claimed; primary=$P, backup=${B:-skipped}, third=${T:-skipped}, fourth=${Q:-skipped}, fallback=${F:-skipped})"
-        echo "probe: token_1=$TOKEN_1 token_2=$TOKEN_2 token_3=$TOKEN_3 token_4=$TOKEN_4"
+        echo "$probe_line"
         echo "A step that exits 0 without posting is the failure this gate exists to catch."
         echo "Most often: the pull request edits .github/workflows/vibecodereview.yml, and"
         echo "claude-code-action refuses to run when the workflow differs from the default branch."

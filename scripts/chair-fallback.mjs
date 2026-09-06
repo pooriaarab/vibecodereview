@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Fallback chair. Runs ONLY when every Claude OAuth token has failed.
+// Fallback chair. Runs when no Claude Code chair step posted a review.
 //
 // The primary chair is anthropics/claude-code-action, which can read the repo,
 // push fixes, and post inline comments. This one cannot: it is a single
@@ -161,17 +161,44 @@ function verdictFlag(findings, claimed) {
   return claimed === "approve" ? "--approve" : "--comment";
 }
 
-function renderBody(parsed, findings, { diffTruncated, reviewHeadSha } = {}) {
+function chairDiagnosisFromEnv() {
+  const probe = [1, 2, 3, 4]
+    .map((n) => `token_${n}=${process.env[`VCR_PROBE_TOKEN_${n}`] || "?"}`)
+    .join(" ");
+  const steps = [
+    `primary=${process.env.VCR_CHAIR_PRIMARY_OUTCOME || "?"}`,
+    `backup=${process.env.VCR_CHAIR_BACKUP_OUTCOME || "?"}`,
+    `third=${process.env.VCR_CHAIR_THIRD_OUTCOME || "?"}`,
+    `fourth=${process.env.VCR_CHAIR_FOURTH_OUTCOME || "?"}`,
+  ].join(" ");
+  const anyLive = [1, 2, 3, 4].some((n) => process.env[`VCR_PROBE_TOKEN_${n}`] === "live");
+  return { probe, steps, anyLive };
+}
+
+export function buildFallbackCaveat({ probe, steps, anyLive } = chairDiagnosisFromEnv()) {
+  const lines = [
+    "> ⚠️ Posted by the **fallback chair**: no Claude Code chair posted a review this run,",
+    "> so this review came from a single OpenRouter completion with no repo access. It saw the diff",
+    "> and the council's findings only — it could not open other files, run anything, or push",
+    "> fixes. Treat it as weaker than a normal review.",
+  ];
+  if (probe && steps) {
+    const detail = anyLive
+      ? `probe (${probe}; auth signature only) saw live token(s); chair steps (${steps}) posted nothing`
+      : `probe (${probe}) saw only dead tokens; chair steps (${steps}) posted nothing`;
+    lines.push(`> Observed: ${detail}.`);
+  }
+  return lines;
+}
+
+function renderBody(parsed, findings, { diffTruncated, reviewHeadSha, diagnosis } = {}) {
   const order = { Critical: 0, Major: 1, Minor: 2 };
   const sorted = findings.toSorted((a, b) => (order[a.severity] ?? 3) - (order[b.severity] ?? 3));
   const icon = { Critical: "🔴", Major: "🟠", Minor: "🟡" };
   const lines = [
     "## 🧑‍⚖️ Council review",
     "",
-    "> ⚠️ Posted by the **fallback chair**: every Claude subscription token failed, so this",
-    "> review came from a single OpenRouter completion with no repo access. It saw the diff",
-    "> and the council's findings only — it could not open other files, run anything, or push",
-    "> fixes. Treat it as weaker than a normal review.",
+    ...buildFallbackCaveat(diagnosis ?? chairDiagnosisFromEnv()),
     "",
     parsed.summary || "_No summary._",
     "",
@@ -270,6 +297,26 @@ function selfcheck() {
   }
   if (!bannedOpenRouterReason("x-ai/grok-4.5")) {
     throw new Error("selfcheck: Grok via OpenRouter was not banned");
+  }
+
+  const liveCaveat = buildFallbackCaveat({
+    probe: "token_1=dead token_2=live token_3=live token_4=live",
+    steps: "primary=skipped backup=failure third=failure fourth=skipped",
+    anyLive: true,
+  }).join("\n");
+  if (liveCaveat.includes("every Claude subscription token failed")) {
+    throw new Error("selfcheck: live-probe caveat must not claim all tokens failed");
+  }
+  if (!liveCaveat.includes("auth signature only")) {
+    throw new Error("selfcheck: live-probe caveat must note probe is auth-only");
+  }
+  const deadCaveat = buildFallbackCaveat({
+    probe: "token_1=dead token_2=dead token_3=dead token_4=dead",
+    steps: "primary=skipped backup=skipped third=skipped fourth=skipped",
+    anyLive: false,
+  }).join("\n");
+  if (!deadCaveat.includes("saw only dead tokens")) {
+    throw new Error("selfcheck: all-dead caveat must say probe saw only dead tokens");
   }
 
   console.log("chair-fallback selfcheck passed");

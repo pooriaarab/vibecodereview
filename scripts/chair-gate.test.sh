@@ -155,5 +155,48 @@ OVER_BUDGET=false P=success B=skipped T=skipped Q=skipped F=skipped TOKEN_1=live
   REVIEWS_JSON="[$(claude_review)]" \
   check_output lacks '::warning::' 'a live primary token warns of nothing'
 
+# Issue #50: probe liveness is auth-only; fallback success must log what was
+# observed, never infer "all tokens failed" from reaching the fallback branch.
+OVER_BUDGET=false P=skipped B=failure T=failure Q=skipped F=success \
+  TOKEN_1=dead TOKEN_2=live TOKEN_3=live TOKEN_4=live \
+  REVIEWS_JSON="[$(fallback_review)]" \
+  check 0 'fallback with live probes still passes the gate'
+OVER_BUDGET=false P=skipped B=failure T=failure Q=skipped F=success \
+  TOKEN_1=dead TOKEN_2=live TOKEN_3=live TOKEN_4=live \
+  REVIEWS_JSON="[$(fallback_review)]" \
+  check_output lacks 'all Claude tokens failed' 'fallback with live probes does not claim all tokens failed'
+OVER_BUDGET=false P=skipped B=failure T=failure Q=skipped F=success \
+  TOKEN_1=dead TOKEN_2=live TOKEN_3=live TOKEN_4=live \
+  REVIEWS_JSON="[$(fallback_review)]" \
+  check_output contains 'OpenRouter fallback posted the review' 'fallback success names the fallback'
+OVER_BUDGET=false P=skipped B=failure T=failure Q=skipped F=success \
+  TOKEN_1=dead TOKEN_2=live TOKEN_3=live TOKEN_4=live \
+  REVIEWS_JSON="[$(fallback_review)]" \
+  check_output contains 'primary=skipped' 'fallback success lists chair step outcomes'
+OVER_BUDGET=false P=skipped B=failure T=failure Q=skipped F=success \
+  TOKEN_1=dead TOKEN_2=live TOKEN_3=live TOKEN_4=live \
+  REVIEWS_JSON="[$(fallback_review)]" \
+  check_output contains 'probe auth-only' 'fallback success notes probe is auth-only when live tokens seen'
+
+# All probed tokens dead: the log may say so explicitly.
+OVER_BUDGET=false P=skipped B=skipped T=skipped Q=skipped F=success \
+  TOKEN_1=dead TOKEN_2=dead TOKEN_3=dead TOKEN_4=dead \
+  REVIEWS_JSON="[$(fallback_review)]" \
+  check 0 'all-dead probe fallback still passes the gate'
+OVER_BUDGET=false P=skipped B=skipped T=skipped Q=skipped F=success \
+  TOKEN_1=dead TOKEN_2=dead TOKEN_3=dead TOKEN_4=dead \
+  REVIEWS_JSON="[$(fallback_review)]" \
+  check_output contains 'all probed Claude tokens dead' 'all-dead probe may say all probed dead'
+
+# Backup success with primary skipped: fallback must not run.
+OVER_BUDGET=false P=skipped B=success T=skipped Q=skipped F=skipped \
+  TOKEN_1=dead TOKEN_2=live TOKEN_3=live TOKEN_4=live \
+  REVIEWS_JSON="[$(claude_review)]" \
+  check 0 'backup success with primary skipped passes'
+OVER_BUDGET=false P=skipped B=success T=skipped Q=skipped F=skipped \
+  TOKEN_1=dead TOKEN_2=live TOKEN_3=live TOKEN_4=live \
+  REVIEWS_JSON="[$(claude_review)]" \
+  check_output lacks 'OpenRouter fallback posted' 'backup success does not mention fallback'
+
 [ "$fails" = 0 ] || { printf '\n%s failing\n' "$fails" >&2; exit 1; }
 printf '\nall passing\n'

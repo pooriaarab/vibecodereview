@@ -74,9 +74,9 @@ chair true | grep -q 'leaves untested a code path this PR changes' && report 0 '
   && report 0 'scope lens asks for evidence covering every changed path' \
   || report 1 'scope lens asks for evidence covering every changed path'
 
-# Path 3: the OpenRouter fallback chair. It runs only when every Claude
-# subscription has failed, and it had no proof rule at all — so an outage
-# silently turned proof off while the check still reported green.
+# Path 3: the OpenRouter fallback chair. It runs when no Claude chair posted a
+# review, and it had no proof rule at all — so an outage silently turned proof
+# off while the check still reported green.
 #
 # This calls the real function rather than grepping the file. The first version
 # greped for two literal strings, so an inverted ternary or a typo'd env name
