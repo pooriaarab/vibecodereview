@@ -896,6 +896,7 @@ runs:
       if: >-
         steps.budget.outputs.over != 'true' &&
         steps.council_start.outputs.trivial != 'true' &&
+        inputs.anthropic_api_key == '' &&
         steps.chair_api_key.outcome != 'success' &&
         steps.chair_primary.outcome != 'success' &&
         steps.chair_backup.outcome != 'success' &&
@@ -913,11 +914,17 @@ runs:
     # weaker review and none at all. On 2026-08-27 both subscriptions capped out
     # at once and the whole fleet lost its review for days — a Claude-only chair
     # makes one vendor's quota a single point of failure for every repo.
+    #
+    # That trade is for a caller on seats, who named no chair in particular.
+    # A caller who set anthropic_api_key pinned the chair to one account on
+    # purpose, so a rejected key must surface as a red check, not as a review
+    # posted by another vendor's model. Hence the input gate below.
     - name: Chair fallback (OpenRouter)
       id: chair_fallback
       if: >-
         steps.budget.outputs.over != 'true' &&
         steps.council_start.outputs.trivial != 'true' &&
+        inputs.anthropic_api_key == '' &&
         steps.chair_api_key.outcome != 'success' &&
         steps.chair_primary.outcome != 'success' &&
         steps.chair_backup.outcome != 'success' &&

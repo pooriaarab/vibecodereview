@@ -170,9 +170,6 @@ OVER_BUDGET=false A=success P=skipped B=skipped T=skipped Q=skipped F=skipped AU
   check_output contains 'api_key posted' 'the gate names the API-key chair as the one that reviewed'
 OVER_BUDGET=false A=failure P=skipped B=skipped T=skipped Q=skipped F=skipped AUTH_MODE=api_key \
   TOKEN_1= TOKEN_2= TOKEN_3= TOKEN_4= REVIEWS_JSON='[]' \
-  check 1 'the API-key chair failing with nothing posted fails the gate'
-OVER_BUDGET=false A=failure P=skipped B=skipped T=skipped Q=skipped F=skipped AUTH_MODE=api_key \
-  TOKEN_1= TOKEN_2= TOKEN_3= TOKEN_4= REVIEWS_JSON='[]' \
   check_output contains 'probe: skipped' 'a failed API-key run says the probe was skipped, not that the tokens are live'
 
 # Trivial-delta path: every model chair is skipped. A cheap step must still

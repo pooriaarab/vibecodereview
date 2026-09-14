@@ -202,9 +202,13 @@ check("a successful API-key chair is not undone by the later cleanups", () => {
   }
 });
 
-check("the OpenRouter fallback does not fire behind a successful API-key chair", () => {
-  const step = action.slice(action.indexOf("id: chair_fallback"));
-  assert.match(step.slice(0, 600), /steps\.chair_api_key\.outcome != 'success'/);
+check("the OpenRouter fallback never runs on the API-key path", () => {
+  // A rejected key must read as a red check, not as a review posted by a
+  // model from a vendor the caller pinned the chair away from.
+  const at = action.indexOf("id: chair_fallback");
+  const step = action.slice(at, action.indexOf("continue-on-error", at));
+  assert.match(step, /inputs\.anthropic_api_key == ''/);
+  assert.match(step, /steps\.chair_api_key\.outcome != 'success'/);
 });
 
 check("the run says which auth it chose", () => {

@@ -113,9 +113,11 @@ npx vibecodereview init          # writes .github/workflows/vibecodereview.yml
 npx vibecodereview secrets --repo owner/name   # prints the gh commands to set keys
 ```
 
-Set at least `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`), or an
-`anthropic_api_key` instead of it. Add provider keys to grow the council. Set
-them on **private** repos.
+Set at least `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`). Add provider
+keys to grow the council. Set them on **private** repos. `init` deliberately
+does not wire `anthropic_api_key` — a repo secret of that name, set for
+anything at all, would otherwise take the whole review onto metered billing.
+Add that line to the workflow by hand, as below.
 
 Or wire the action directly:
 
@@ -207,10 +209,7 @@ in the step's environment. Set `CLI_TIMEOUT_MS` to change their budget
   with:
     anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
     github_token: ${{ github.token }}
-    council_models: >-
-      claude|claude-opus-5|Claude Opus 5|correctness,
-      claude2|claude-sonnet-5|Claude Sonnet 5|security,
-      claude3|claude-sonnet-5|Claude Sonnet 5|scope
+    council_models: "claude|claude-opus-5|Opus 5|correctness,claude2|claude-sonnet-5|Sonnet 5|security"
 ```
 
 Set `anthropic_api_key` and it is the auth for the chair and for every `claude*`
