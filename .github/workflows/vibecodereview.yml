@@ -23,6 +23,8 @@ jobs:
       id-token: write
     steps:
       # Dogfood: review this repo's own PRs with the local action.
+      # SCRATCH: this line edits the workflow that invokes the action, to
+      # reproduce the self-skip issue #166 fixes. Not for merge.
       - uses: actions/checkout@v4
       - uses: ./
         with:
