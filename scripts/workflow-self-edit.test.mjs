@@ -90,4 +90,19 @@ assert.ok(
   "the fix-cycle guard must turn pushes off for a self-edited workflow",
 );
 
+// The gate's failure message now reads self_edit to say whether the remedy was
+// even attempted. Unwire the env and it prints "unset" forever, which sends the
+// next person debugging a silent chair to the wrong place -- the same cost the
+// old message carried when it blamed a cause it could not check.
+const gate = steps.find((s) => s.includes("name: Chair result gate") || s.startsWith("Chair result gate"));
+assert.ok(gate, "chair result gate step not found");
+assert.ok(
+  gate.includes("SELF_EDIT: ${{ steps.workflow_guard.outputs.self_edit }}"),
+  "the chair result gate must read self_edit, or its failure message cannot say whether the remedy ran",
+);
+assert.ok(
+  gate.includes("${SELF_EDIT:-unset}"),
+  "the gate must default SELF_EDIT, since `set -u` would otherwise kill the message it exists to print",
+);
+
 console.log("ok    workflow-self-edit");
