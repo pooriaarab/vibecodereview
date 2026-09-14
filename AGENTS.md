@@ -86,6 +86,11 @@ new council member costs a model call per PR in all of them.
 vibecodereview sends diffs to third-party model providers. Use it on **personal /
 private repos**. Do not point it at proprietary or employer code.
 
+The one exception is a run that reaches a single account you control: pass
+`anthropic_api_key` and no other provider key, and the diff reaches Anthropic
+on that organisation's own key and nowhere else. That is a deliberate
+configuration; the default still fans the diff out to four vendors.
+
 <!-- pr-standards:start -->
 
 ## Pull requests

@@ -48,6 +48,8 @@ export PATH="$WORK/bin:$PATH"
 
 export VCR_PR=1 VCR_REPO=owner/repo STARTED_AT=2026-01-01T12:00:00Z
 export TOKEN_1=live TOKEN_2=live TOKEN_3=live TOKEN_4=live
+# The default shape of a run: seat rotation, so the API-key chair never ran.
+export A=skipped AUTH_MODE=oauth
 
 fails=0
 check() {
@@ -154,6 +156,21 @@ OVER_BUDGET=false P=failure B=failure T=failure Q=failure F=failure TOKEN_1=dead
 OVER_BUDGET=false P=success B=skipped T=skipped Q=skipped F=skipped TOKEN_1=live TOKEN_2=live \
   REVIEWS_JSON="[$(claude_review)]" \
   check_output lacks '::warning::' 'a live primary token warns of nothing'
+
+# The anthropic_api_key path. Every token chair is skipped, the seat probe
+# never ran, and the one chair that did run is the API-key one. The gate must
+# read that as a real attempt -- and, when nothing posted, must not print four
+# token verdicts it did not measure, which would send the reader to re-mint
+# subscription tokens this run was never going to touch.
+OVER_BUDGET=false A=success P=skipped B=skipped T=skipped Q=skipped F=skipped AUTH_MODE=api_key \
+  TOKEN_1= TOKEN_2= TOKEN_3= TOKEN_4= REVIEWS_JSON="[$(claude_review)]" \
+  check 0 'the API-key chair posting passes'
+OVER_BUDGET=false A=success P=skipped B=skipped T=skipped Q=skipped F=skipped AUTH_MODE=api_key \
+  TOKEN_1= TOKEN_2= TOKEN_3= TOKEN_4= REVIEWS_JSON="[$(claude_review)]" \
+  check_output contains 'api_key posted' 'the gate names the API-key chair as the one that reviewed'
+OVER_BUDGET=false A=failure P=skipped B=skipped T=skipped Q=skipped F=skipped AUTH_MODE=api_key \
+  TOKEN_1= TOKEN_2= TOKEN_3= TOKEN_4= REVIEWS_JSON='[]' \
+  check_output contains 'probe: skipped' 'a failed API-key run says the probe was skipped, not that the tokens are live'
 
 # Trivial-delta path: every model chair is skipped. A cheap step must still
 # post a review the gate can see, or the check never concludes.

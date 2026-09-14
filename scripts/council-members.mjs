@@ -77,11 +77,18 @@ export async function callModel(model, diff) {
   const provider = PROVIDERS[model.provider];
   // A subscription seat has no chat endpoint to POST to.
   if (provider?.cli) {
-    const token = process.env[provider.keyEnv]?.trim();
-    if (!token) return timed({ model, error: `skipped: ${provider.keyEnv} not set` });
+    // The caller's own Anthropic key, when they supplied one, is the auth for
+    // every Claude lens: it is billed to their organisation rather than to a
+    // subscription, so there is no seat to rotate and no per-slot token to
+    // look up. Read from VCR_ANTHROPIC_API_KEY, never ANTHROPIC_API_KEY —
+    // only the action's `anthropic_api_key` input reaches that name, so a
+    // stray key in the job environment cannot take this path. See seatEnv().
+    const apiKey = process.env.VCR_ANTHROPIC_API_KEY?.trim();
+    const token = apiKey ? "" : process.env[provider.keyEnv]?.trim();
+    if (!apiKey && !token) return timed({ model, error: `skipped: ${provider.keyEnv} not set` });
     const instructions = `${systemPrompt(model.lens)}\n\nReview the PR diff piped on stdin.`;
     return timed(
-      await callClaudeCli(model, diff, token, {
+      await callClaudeCli(model, diff, apiKey ? { apiKey } : { oauthToken: token }, {
         instructions,
         timeoutMs: CLI_TIMEOUT_MS,
         effortRung: cliEffortRung(model),
@@ -138,8 +145,12 @@ export async function callModel(model, diff) {
 // member already on OpenRouter has nowhere to fall back to, and a genuine model
 // error must NOT be retried — that would double the cost of every real failure.
 export function hasNativeKey(model) {
-  const keyEnv = PROVIDERS[model.provider]?.keyEnv;
-  return Boolean(keyEnv && process.env[keyEnv]?.trim());
+  const provider = PROVIDERS[model.provider];
+  // A Claude seat is credentialed by the anthropic_api_key input as well as by
+  // its own OAuth slot. Reading only the slot made a fully authenticated
+  // key-only run report "no provider keys set" and skip the whole council.
+  if (provider?.cli && process.env.VCR_ANTHROPIC_API_KEY?.trim()) return true;
+  return Boolean(provider?.keyEnv && process.env[provider.keyEnv]?.trim());
 }
 
 export async function callModelWithFallback(model, diff) {
