@@ -126,4 +126,18 @@ assert.ok(
   "the gate must default SELF_EDIT, since `set -u` would otherwise kill the message it exists to print",
 );
 
+// The `@refs/` rule lives in one place. A second, looser copy in shell would
+// print a path the script never decided, which is how a diagnostic starts
+// lying about the thing it is there to report.
+const guard = steps.find((s) => s.startsWith("Detect a self-edited workflow"));
+assert.ok(guard, "detection step not found");
+// Comment lines are stripped first. The first version of this assertion read
+// the whole step and tripped on the comment that explains the rule, which
+// would have taught the next person to delete the explanation to get green.
+const guardCode = guard.split("\n").filter((l) => !l.trim().startsWith("#")).join("\n");
+assert.ok(
+  !/\$\{GITHUB_WORKFLOW_REF[%#]/.test(guardCode),
+  "the detection step must not re-parse GITHUB_WORKFLOW_REF in shell; the @refs/ rule has one home",
+);
+
 console.log("ok    workflow-self-edit");

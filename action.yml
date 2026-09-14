@@ -477,7 +477,12 @@ runs:
         SELF_EDIT="$(node "${{ github.action_path }}/scripts/workflow-self-edit.mjs" pr.diff)"
         echo "self_edit=$SELF_EDIT" >> "$GITHUB_OUTPUT"
         if [ "$SELF_EDIT" = "true" ]; then
-          echo "::notice::this pull request edits its own workflow (${GITHUB_WORKFLOW_REF%@*}); the chair authenticates with the caller's token instead of the Claude app, and does not push fixes"
+          # Print the ref whole. `${GITHUB_WORKFLOW_REF%@*}` strips from the
+          # LAST `@`, which is the very parsing this change rejected: on a
+          # workflow or branch carrying an `@` it prints a path the script
+          # never decided. A diagnostic that disagrees with the decision it
+          # reports is worse than none, so bash does no parsing at all.
+          echo "::notice::this pull request edits its own workflow ($GITHUB_WORKFLOW_REF); the chair authenticates with the caller's token instead of the Claude app, and does not push fixes"
         fi
 
     - name: Fix-cycle guard
