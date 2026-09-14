@@ -365,7 +365,13 @@ async function main() {
   }));
   for (const r of results) {
     const took = r.ms === undefined ? "" : ` (${(r.ms / 1000).toFixed(1)}s)`;
-    console.log(`- ${r.model.name}${took}: ${r.error ? "SKIP/ERR " + r.error : "ok"}`);
+    // An infra failure (e.g. a CLI seat's `spawn claude ENOENT`) gets its own
+    // tag, distinct from SKIP/ERR: a log scanner grepping for "SKIP/ERR" to
+    // separate "this member reviewed and found nothing" from "this member
+    // never got to review" must not have to also parse the error text of
+    // every ordinary skip/reject to find the one that matters.
+    const tag = r.error ? (r.infra ? "INFRA-ERR " : "SKIP/ERR ") : "";
+    console.log(`- ${r.model.name}${took}: ${tag}${r.error || "ok"}`);
   }
   console.log(
     `Council wall time: ${((Date.now() - councilStartedAt) / 1000).toFixed(1)}s (timeout ${REQUEST_TIMEOUT_MS / 1000}s)`,

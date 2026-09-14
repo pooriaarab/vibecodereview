@@ -99,7 +99,11 @@ export function buildFindingsMarkdown(
   for (const r of results) {
     const cached = r.cached ? " (cached)" : "";
     lines.push(`## ${r.model.name} — ${r.model.lens} lens${cached}`, "");
-    if (r.error) lines.push(`_${r.error}_`, "");
+    // An infra failure (the CLI binary was missing when this seat spawned)
+    // is not a review verdict and must not read like one: a plain italic
+    // note is exactly how a "no findings" skip renders below, so give this
+    // case its own visible marker instead of reusing that shape.
+    if (r.error) lines.push(r.infra ? `> ⚠️ **Infrastructure failure, not a review:** ${r.error}` : `_${r.error}_`, "");
     else lines.push(r.text, "");
   }
   if (carriedFindings?.trim()) {

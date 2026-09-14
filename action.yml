@@ -271,10 +271,35 @@ runs:
         echo "council runs: $council/$max_council"
         if [ -n "$over" ]; then echo "Over budget: $over"; fi
 
-    # The council is network-bound and the setup below is not, so start the
-    # fan-out here and collect it just before the chair. Everything between the
-    # two steps — the CLI install, the fix-cycle guard, the prompt build — now
-    # runs inside the council's own latency instead of after it.
+    # A claude*-provider council seat shells the Claude Code CLI directly
+    # (scripts/claude-cli-seat.mjs), so it needs the binary to exist before the
+    # fan-out below spawns it -- unlike an HTTP member, which posts over the
+    # network and can absorb setup time inside its own latency, and unlike the
+    # chair's own install below, which can still wait. VCR-163: the only
+    # install step used to sit after the fan-out, so a CLI seat always spawned
+    # before the binary existed and died in 0.0s with `spawn claude ENOENT`.
+    # Resolving the roster costs nothing (COUNCIL_MODELS only, no diff to
+    # build), so do it here and only pay the serial install cost when a CLI
+    # seat is actually in the roster -- an all-HTTP roster still gets the
+    # install for free, hidden behind the fan-out exactly as before. See
+    # scripts/council-order.test.mjs for the ordering this depends on.
+    - name: Install Claude Code CLI (CLI council seats)
+      if: steps.budget.outputs.over != 'true'
+      shell: bash
+      env:
+        COUNCIL_MODELS: ${{ inputs.council_models }}
+      run: |
+        if [ "$(node "${{ github.action_path }}/scripts/council-roster-has-cli.mjs")" = "true" ]; then
+          bash "${{ github.action_path }}/scripts/install-claude-cli.sh"
+        else
+          echo "No CLI provider in the roster; deferring the install to the step after the council starts."
+        fi
+
+    # HTTP members are network-bound and the setup below is not, so their
+    # setup cost still hides behind the fan-out's own latency -- start it here
+    # and collect it just before the chair, same as before this file's CLI
+    # seats existed. A CLI seat is why that reasoning cannot cover everyone:
+    # see the step above.
     - name: Council fan-out (start)
       id: council_start
       if: steps.budget.outputs.over != 'true'
@@ -417,26 +442,15 @@ runs:
     - name: Install Claude Code CLI
       if: steps.council_start.outputs.trivial != 'true'
       # anthropics/claude-code-action expects the Claude Code native binary at
-      # ~/.local/bin/claude; install it here so the chair step never dies with
-      # "native binary not found". GITHUB_PATH persists into later steps.
-      # Skip the download when a caller workflow already installed it — several
-      # do, and paying for the same install twice cost ~5s a run.
+      # ~/.local/bin/claude; this is the chair's own install, and it always
+      # needs to run once the delta is non-trivial, independent of the council
+      # roster. An all-HTTP roster reaches this as its first and only install,
+      # hidden behind the fan-out's latency exactly as before VCR-163. A
+      # CLI-seat roster already installed it in "Install Claude Code CLI (CLI
+      # council seats)" above, so install-claude-cli.sh's own check-then-skip
+      # makes this call a no-op there.
       shell: bash
-      run: |
-        echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-        if command -v claude >/dev/null 2>&1 || [ -x "$HOME/.local/bin/claude" ]; then
-          echo "Claude Code CLI already present; skipping install."
-        else
-          # Retry the download. Every later step -- the council fan-out, all
-          # three chair attempts, the OpenRouter fallback -- runs after this
-          # one, so a single connection reset here loses the whole review and
-          # none of those fallbacks gets a turn. --retry-all-errors is the
-          # flag that makes a reset retryable: on its own --retry covers
-          # transient HTTP statuses and timeouts, and a reset is neither.
-          curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors \
-            https://claude.ai/install.sh -o "$RUNNER_TEMP/install-claude.sh"
-          bash "$RUNNER_TEMP/install-claude.sh"
-        fi
+      run: bash "${{ github.action_path }}/scripts/install-claude-cli.sh"
 
     - name: Fix-cycle guard
       id: cycle
