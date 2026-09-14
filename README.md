@@ -10,19 +10,19 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="License MIT"></a>
 </p>
 
-Two findings from one real review, quoted from
-[pooriaarab/skills#434](https://github.com/pooriaarab/skills/pull/434):
+```
+Major — fixed. repo-standards/SKILL.md baked in a time-sensitive fleet count
+  [...] Reworded to "most public repos in this fleet had none" in 4976ff0.
 
-> **Major — fixed.** `repo-standards/SKILL.md` baked in a time-sensitive fleet
-> count [...] Reworded to "most public repos in this fleet had none" in `4976ff0`.
->
-> **Major — open, not fixed.** The PR body's "How I verified" section is stale
-> [...] This is the author's evidence to regenerate [...] so I'm flagging it
-> rather than rewriting the PR body myself.
+Major — open, not fixed. The PR body's "How I verified" section is stale [...]
+  This is the author's evidence to regenerate [...] so I'm flagging it rather
+  than rewriting the PR body myself.
+```
 
+<p align="center"><em>Two findings from one real review, on
+<a href="https://github.com/pooriaarab/skills/pull/434">pooriaarab/skills#434</a>.
 It fixed the first and pushed the commit. It declined to fix the second, because
-rewriting an author's own evidence would defeat the point of asking for it. That
-line is the product.
+rewriting an author's own evidence would defeat the point of asking for it.</em></p>
 
 ## Contents
 
@@ -74,7 +74,19 @@ verdict, self-healing fix.
 ▶ **[Watch the launch trailer](https://getvibe.dev/vibecodereview)** ·
 [16:9](assets/vibecodereview-trailer-16x9.mp4) · [9:16](assets/vibecodereview-trailer-9x16.mp4)
 
-## The council
+## How it works
+
+A pull request opens. The action routes the delta to the lenses that can speak
+to the files it touches, and calls each provider directly. Every member returns
+findings independently. Claude chairs: it checks each claim against the code,
+drops what it cannot confirm, fixes what it can, pushes that commit to the
+branch, and posts one review.
+
+A trivial delta, such as a lockfile or docs-only push, skips the council
+entirely before any lens is dispatched.
+
+### The council
+
 
 | Member | Provider (called directly) | Secret | Lens |
 | --- | --- | --- | --- |
