@@ -28,8 +28,19 @@ import { diffPaths } from "./review-delta.mjs";
 // `github.workflow_ref` is `owner/repo/.github/workflows/name.yml@refs/...`.
 // Strip the git ref, then the `owner/repo/` prefix, and what is left is the
 // repository-relative path of the workflow that is running.
+//
+// Split on `@refs/`, not on `@`. Both halves can carry an `@`: a workflow file
+// may be named `review@v2.yml`, and a branch may be named `feature@2`. Cutting
+// at the first `@` truncates the path, cutting at the last one eats the
+// filename when the branch carries it, and either way the path stops matching,
+// `self_edit` reads false, and the chair goes back to self-skipping in silence
+// — this bug wearing the costume of its own fix. The ref half of
+// `workflow_ref` is always a FULL ref, so `@refs/` is an anchor neither half
+// can forge: a path segment cannot contain `/`.
 export function workflowPathFromRef(ref) {
-  const withoutRef = String(ref ?? "").split("@")[0];
+  const value = String(ref ?? "");
+  const separator = value.lastIndexOf("@refs/");
+  const withoutRef = separator === -1 ? value : value.slice(0, separator);
   if (!withoutRef) return "";
   const parts = withoutRef.split("/");
   // owner + repo + at least one path segment.

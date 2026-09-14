@@ -29,6 +29,27 @@ const diffFor = (...paths) =>
 
 assert.equal(workflowPathFromRef(REF), ".github/workflows/vibecodereview.yml");
 assert.equal(workflowPathFromRef("o/r/.github/workflows/x.yml"), ".github/workflows/x.yml");
+
+// An `@` on either side of the separator. A workflow file may be named
+// `review@v2.yml` and a branch may be named `feature@2`, so neither the first
+// `@` nor the last one is the separator. Getting this wrong returns a path that
+// matches nothing, `self_edit` reads false, and the chair self-skips in silence
+// — this bug re-created by its own fix, which is why both cases are pinned.
+assert.equal(
+  workflowPathFromRef("o/r/.github/workflows/review@v2.yml@refs/pull/7/merge"),
+  ".github/workflows/review@v2.yml",
+  "an `@` in the workflow filename must not truncate the path",
+);
+assert.equal(
+  workflowPathFromRef("o/r/.github/workflows/review@v2.yml@refs/heads/feature@2"),
+  ".github/workflows/review@v2.yml",
+  "an `@` in the branch name must not eat the filename",
+);
+assert.equal(
+  selfEditsWorkflow(diffFor(".github/workflows/review@v2.yml"),
+    "o/r/.github/workflows/review@v2.yml@refs/heads/feature@2"),
+  true,
+);
 // A malformed or absent ref must not be read as a self-edit: that would move
 // every review in the fleet onto the caller's token and off claude[bot].
 for (const bad of ["", null, undefined, "owner/repo", "@refs/heads/main"]) {
