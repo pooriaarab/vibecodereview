@@ -23,6 +23,8 @@ jobs:
       id-token: write
     steps:
       # Dogfood: review this repo's own PRs with the local action.
+      # SCRATCH: edits the invoking workflow so self_edit fires and the
+      # notice line under test actually prints. Not for merge.
       - uses: actions/checkout@v4
       - uses: ./
         with:
