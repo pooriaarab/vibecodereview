@@ -309,8 +309,15 @@ Set it to `0` to disable.
 Over the ceiling, the action skips the council and the chair, labels the pull
 request `needs-human`, and leaves one comment saying which ceiling it hit and
 what to decide. It edits that comment rather than posting another. **The check
-still passes.** A budget stop is a routing decision, not a verdict on the code,
-and a red check there would hide a real failure behind a bookkeeping one.
+fails.** A budget stop used to pass, on the reasoning that it is a routing
+decision rather than a verdict on the code, and that a red check would hide a
+real failure behind a bookkeeping one. In practice that made a spent budget and
+a completed review report identically: a PR page has no way to tell "this was
+reviewed" from "we already spent the budget on an earlier push" (fleet
+incident: pooriaarab/alongside#315). Green is the direction that gets merged
+without a second look, so it is the direction that must not lie. The label and
+comment still carry the *why* -- the failing check only carries the fact that
+no review happened on this push.
 
 Both numbers come from one API call. Real billable minutes need a request per
 run, which turns a guard against waste into a source of it — so the ceilings

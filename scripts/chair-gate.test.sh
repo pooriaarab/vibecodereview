@@ -139,10 +139,16 @@ OVER_BUDGET=false P=failure B=failure T=failure Q=failure F=success \
   REVIEWS_JSON="[$(unrelated_review 2026-01-01T10:00:00Z), $(claude_review 2026-01-01T11:30:00Z), $(fallback_review)]" \
   check 0 'a qualifying review counts even split across multiple pages'
 
-# Over budget is a routing decision, not a verdict on the code, so it passes
-# without a review. Failing here would hide a real failure behind a cost stop.
+# Over budget used to pass without a review, on the reasoning that it is a
+# routing decision rather than a verdict on the code. That made a spent
+# budget and a completed review report identically green (alongside#315): a
+# PR page could not tell "this was reviewed" from "we already spent the
+# budget on an earlier push". The gate now fails, same as any other push that
+# posted nothing -- the needs-human label and PR comment (posted by the
+# "Route the pull request to a person" step) carry the *why* so a red check
+# here is not mistaken for a code problem.
 OVER_BUDGET=true P=skipped B=skipped T=skipped Q=skipped F=skipped REVIEWS_JSON='[]' \
-  check 0 'an over-budget run passes without a review'
+  check 1 'an over-budget run fails the gate, distinct from a review'
 
 # The primary subscription failing over to a backup token is easy to miss --
 # the gate still goes green -- so it must warn on both the success and
