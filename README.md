@@ -23,7 +23,7 @@ verdict, self-healing fix.
 
 | Member | Provider (called directly) | Secret | Lens |
 | --- | --- | --- | --- |
-| Chair | Claude (subscription OAuth) | `CLAUDE_CODE_OAUTH_TOKEN` | synthesis + conventions + tests + proof + fixes |
+| Chair | Claude (subscription OAuth, or your own API key) | `CLAUDE_CODE_OAUTH_TOKEN`, or `anthropic_api_key` | synthesis + conventions + tests + proof + fixes |
 | GPT / Codex | api.openai.com | `OPENAI_API_KEY` | correctness, silent failures |
 | Gemini | generativelanguage.googleapis.com | `GEMINI_API_KEY` | performance, type design |
 | Kimi | api.moonshot.ai | `MOONSHOT_API_KEY` | security |
@@ -113,8 +113,9 @@ npx vibecodereview init          # writes .github/workflows/vibecodereview.yml
 npx vibecodereview secrets --repo owner/name   # prints the gh commands to set keys
 ```
 
-Set at least `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`). Add provider
-keys to grow the council. Set them on **private** repos.
+Set at least `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`), or an
+`anthropic_api_key` instead of it. Add provider keys to grow the council. Set
+them on **private** repos.
 
 Or wire the action directly:
 
@@ -198,6 +199,45 @@ the PR checkout — `claude -p` skips the workspace-trust prompt and would
 otherwise execute a repo-local `.claude/settings.json` hook with every secret
 in the step's environment. Set `CLI_TIMEOUT_MS` to change their budget
 (default 240000).
+
+### An Anthropic API key instead of seats
+
+```yaml
+- uses: pooriaarab/vibecodereview@v1
+  with:
+    anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+    github_token: ${{ github.token }}
+    council_models: >-
+      claude|claude-opus-5|Claude Opus 5|correctness,
+      claude2|claude-sonnet-5|Claude Sonnet 5|security,
+      claude3|claude-sonnet-5|Claude Sonnet 5|scope
+```
+
+Set `anthropic_api_key` and it is the auth for the chair and for every `claude*`
+lens. No OAuth seat is consumed, the seat probe does not run, and the key wins
+over any `claude_code_oauth_token` passed alongside it. The run logs which of
+the two it chose, on a `claude auth:` line, before it spends anything.
+
+Choose the key over seats when **who pays, and who the diff reaches, is the
+point**. A seat bills a person; an API key bills the organisation that issued
+it. Pass the key and no other provider key, and Anthropic is the only vendor
+the diff reaches — every other member drops out on its own missing key, and
+the OpenRouter fallback chair is already gated on `openrouter_api_key`. With
+the key, `claude` through `claude4` are slots on one account, differing only
+by model and lens. Choose seats when cost is the point: a seat bills a flat
+subscription you already pay for, and four of them rotate when one caps out.
+
+**Setting `ANTHROPIC_API_KEY` as a job-level environment variable does nothing,
+and that is deliberate.** Every Claude call strips it. The CLI prefers that
+variable over a claude.ai login, so a key left lying in the environment would
+move the whole review off the subscriptions and onto metered billing with
+nothing in the output to say so. The input makes that switch an act somebody
+performed rather than one they inherited. Locally, where there is no action to
+read an input, the engine reads the name the action writes:
+`VCR_ANTHROPIC_API_KEY`.
+
+Pass neither and nothing changes: the chair fails and the result gate turns the
+check red, exactly as before.
 
 ### Custom / OffRouter provider
 

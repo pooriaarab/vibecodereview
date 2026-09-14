@@ -6,8 +6,12 @@ branding:
 
 inputs:
   claude_code_oauth_token:
-    description: "Claude Code OAuth token (from `claude setup-token`). The chair model — synthesizes, fixes, posts the review."
-    required: true
+    description: "Claude Code OAuth token (from `claude setup-token`). The chair model — synthesizes, fixes, posts the review. Required unless anthropic_api_key is set."
+    required: false
+  anthropic_api_key:
+    description: "Anthropic API key. Set it and it becomes the auth for the chair and every Claude lens: no OAuth seat is consumed, no seat is probed, and it wins over any claude_code_oauth_token also passed. Use it when the code being reviewed must be billed to, and stay inside, one organisation's own Anthropic account rather than a personal subscription. Leaving it unset changes nothing — a bare ANTHROPIC_API_KEY in the job environment is still stripped from every Claude call, because only this input is a deliberate act."
+    required: false
+    default: ""
   claude_code_oauth_token_2:
     description: "Backup Claude Code OAuth token (a second subscription). Used only if the chair run with the primary token fails (e.g. rate-limit / quota exhaustion). Omit to disable failover."
     required: false
@@ -101,6 +105,33 @@ runs:
       id: gate_start
       shell: bash
       run: echo "at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
+    # Say which credential this run is on, before anything spends one. The
+    # strip below exists because the CLI's preference for ANTHROPIC_API_KEY
+    # over a claude.ai login is invisible from the output: the seats drain and
+    # nothing says why. A key path added without this line would recreate that
+    # one layer up. First step, so the mask registers before anything can echo
+    # the value; `secrets.*` is masked already, this covers a literal.
+    - name: Resolve Claude auth
+      id: auth
+      shell: bash
+      env:
+        VCR_KEY: ${{ inputs.anthropic_api_key }}
+        VCR_T1: ${{ inputs.claude_code_oauth_token }}
+      run: |
+        if [ -n "$VCR_KEY" ]; then
+          printf '::add-mask::%s\n' "$VCR_KEY"
+          echo "mode=api_key" >> "$GITHUB_OUTPUT"
+          if [ -n "$VCR_T1" ]; then
+            echo "claude auth: anthropic_api_key (the input wins; the OAuth seats passed alongside it are NOT used and no seat is consumed)"
+          else
+            echo "claude auth: anthropic_api_key (no OAuth seat is consumed)"
+          fi
+        else
+          echo "mode=oauth" >> "$GITHUB_OUTPUT"
+          echo "claude auth: OAuth seat rotation (no anthropic_api_key input; any ANTHROPIC_API_KEY in this job's environment is stripped)"
+        fi
+
     - name: Checkout PR branch
       uses: actions/checkout@v4
       with:
@@ -261,6 +292,11 @@ runs:
         CLAUDE_CODE_OAUTH_TOKEN_2: ${{ inputs.claude_code_oauth_token_2 }}
         CLAUDE_CODE_OAUTH_TOKEN_3: ${{ inputs.claude_code_oauth_token_3 }}
         CLAUDE_CODE_OAUTH_TOKEN_4: ${{ inputs.claude_code_oauth_token_4 }}
+        # Deliberately NOT named ANTHROPIC_API_KEY. Every seat strips that
+        # name out of its child environment and always will, so a key merely
+        # sitting in the job env can never authenticate one. Only the input
+        # arrives under this name, and only then does a seat use a key.
+        VCR_ANTHROPIC_API_KEY: ${{ inputs.anthropic_api_key }}
         COUNCIL_MODELS: ${{ inputs.council_models }}
         COUNCIL_TIMEOUT_MS: ${{ inputs.council_timeout_ms }}
         MUTATION_LENS: ${{ inputs.mutation_lens }}
@@ -611,9 +647,15 @@ runs:
     # Placement is deliberate. This sits between the council's start and its
     # await, so the probe overlaps the council's background window (5.5s
     # measured) instead of adding to the critical path.
+    #
+    # Skipped when anthropic_api_key is set: no seat is in play, so this could
+    # only spend ~1-4s reporting on four tokens the run never touches, and a
+    # "dead" verdict would read as a problem with a review not using it. The
+    # gates below then read its outputs as empty, which is not 'dead', so the
+    # fail-open rule keeps holding.
     - name: Probe chair tokens
       id: chair_probe
-      if: steps.council_start.outputs.trivial != 'true'
+      if: steps.council_start.outputs.trivial != 'true' && inputs.anthropic_api_key == ''
       shell: bash
       env:
         VCR_T1: ${{ inputs.claude_code_oauth_token }}
@@ -750,9 +792,27 @@ runs:
     # use case. Kept OUT deliberately: WebFetch/WebSearch (no external network
     # reach for a reviewer), Task (no subagent spawning), NotebookEdit/
     # SlashCommand/ExitPlanMode (not applicable here).
+    #
+    # This step and the failover chain below it are mutually exclusive by
+    # construction, and neither is a fallback for the other. A caller who
+    # wants their own Anthropic account billed does not want a silent hop onto
+    # somebody's subscription when their key is rejected — they want the red
+    # check that says the key is wrong.
+    - name: Chair review (Anthropic API key)
+      id: chair_api_key
+      if: steps.budget.outputs.over != 'true' && steps.council_start.outputs.trivial != 'true' && inputs.anthropic_api_key != ''
+      continue-on-error: true
+      uses: anthropics/claude-code-action@v1
+      with:
+        anthropic_api_key: ${{ inputs.anthropic_api_key }}
+        use_commit_signing: true
+        allowed_bots: "*"
+        prompt: ${{ steps.prompt.outputs.text }}
+        claude_args: '--allowed-tools "Bash(gh api:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr review:*),Bash(gh pr comment:*),Bash(git:*),Bash(jq:*),Bash(cat:*),Bash(ls:*),Bash(head:*),Bash(wc:*),Read,Glob,Grep,Edit,Write,TodoWrite"'
+
     - name: Chair review (primary token)
       id: chair_primary
-      if: steps.budget.outputs.over != 'true' && steps.council_start.outputs.trivial != 'true' && steps.chair_probe.outputs.token_1 != 'dead'
+      if: steps.budget.outputs.over != 'true' && steps.council_start.outputs.trivial != 'true' && inputs.anthropic_api_key == '' && steps.chair_probe.outputs.token_1 != 'dead'
       continue-on-error: true
       uses: anthropics/claude-code-action@v1
       with:
@@ -773,14 +833,14 @@ runs:
     # that already decides whether that attempt runs, so a still-running
     # earlier success (which skips every later attempt) is never touched.
     - name: Clear stale chair-verdicts.json before backup attempt
-      if: steps.budget.outputs.over != 'true' && steps.council_start.outputs.trivial != 'true' && steps.chair_primary.outcome != 'success'
+      if: steps.budget.outputs.over != 'true' && steps.council_start.outputs.trivial != 'true' && inputs.anthropic_api_key == '' && steps.chair_primary.outcome != 'success'
       continue-on-error: true
       shell: bash
       run: rm -f "$VCR_CHAIR_VERDICTS"
 
     - name: Chair review (backup token)
       id: chair_backup
-      if: steps.budget.outputs.over != 'true' && steps.council_start.outputs.trivial != 'true' && steps.chair_primary.outcome != 'success' && steps.chair_probe.outputs.token_2 != 'dead' && inputs.claude_code_oauth_token_2 != ''
+      if: steps.budget.outputs.over != 'true' && steps.council_start.outputs.trivial != 'true' && inputs.anthropic_api_key == '' && steps.chair_primary.outcome != 'success' && steps.chair_probe.outputs.token_2 != 'dead' && inputs.claude_code_oauth_token_2 != ''
       continue-on-error: true
       uses: anthropics/claude-code-action@v1
       with:
@@ -791,14 +851,14 @@ runs:
         claude_args: '--allowed-tools "Bash(gh api:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr review:*),Bash(gh pr comment:*),Bash(git:*),Bash(jq:*),Bash(cat:*),Bash(ls:*),Bash(head:*),Bash(wc:*),Read,Glob,Grep,Edit,Write,TodoWrite"'
 
     - name: Clear stale chair-verdicts.json before third attempt
-      if: steps.budget.outputs.over != 'true' && steps.council_start.outputs.trivial != 'true' && steps.chair_primary.outcome != 'success' && steps.chair_backup.outcome != 'success'
+      if: steps.budget.outputs.over != 'true' && steps.council_start.outputs.trivial != 'true' && inputs.anthropic_api_key == '' && steps.chair_primary.outcome != 'success' && steps.chair_backup.outcome != 'success'
       continue-on-error: true
       shell: bash
       run: rm -f "$VCR_CHAIR_VERDICTS"
 
     - name: Chair review (third token)
       id: chair_third
-      if: steps.budget.outputs.over != 'true' && steps.council_start.outputs.trivial != 'true' && steps.chair_primary.outcome != 'success' && steps.chair_backup.outcome != 'success' && steps.chair_probe.outputs.token_3 != 'dead' && inputs.claude_code_oauth_token_3 != ''
+      if: steps.budget.outputs.over != 'true' && steps.council_start.outputs.trivial != 'true' && inputs.anthropic_api_key == '' && steps.chair_primary.outcome != 'success' && steps.chair_backup.outcome != 'success' && steps.chair_probe.outputs.token_3 != 'dead' && inputs.claude_code_oauth_token_3 != ''
       continue-on-error: true
       uses: anthropics/claude-code-action@v1
       with:
@@ -809,14 +869,14 @@ runs:
         claude_args: '--allowed-tools "Bash(gh api:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr review:*),Bash(gh pr comment:*),Bash(git:*),Bash(jq:*),Bash(cat:*),Bash(ls:*),Bash(head:*),Bash(wc:*),Read,Glob,Grep,Edit,Write,TodoWrite"'
 
     - name: Clear stale chair-verdicts.json before fourth attempt
-      if: steps.budget.outputs.over != 'true' && steps.council_start.outputs.trivial != 'true' && steps.chair_primary.outcome != 'success' && steps.chair_backup.outcome != 'success' && steps.chair_third.outcome != 'success'
+      if: steps.budget.outputs.over != 'true' && steps.council_start.outputs.trivial != 'true' && inputs.anthropic_api_key == '' && steps.chair_primary.outcome != 'success' && steps.chair_backup.outcome != 'success' && steps.chair_third.outcome != 'success'
       continue-on-error: true
       shell: bash
       run: rm -f "$VCR_CHAIR_VERDICTS"
 
     - name: Chair review (fourth token)
       id: chair_fourth
-      if: steps.budget.outputs.over != 'true' && steps.council_start.outputs.trivial != 'true' && steps.chair_primary.outcome != 'success' && steps.chair_backup.outcome != 'success' && steps.chair_third.outcome != 'success' && steps.chair_probe.outputs.token_4 != 'dead' && inputs.claude_code_oauth_token_4 != ''
+      if: steps.budget.outputs.over != 'true' && steps.council_start.outputs.trivial != 'true' && inputs.anthropic_api_key == '' && steps.chair_primary.outcome != 'success' && steps.chair_backup.outcome != 'success' && steps.chair_third.outcome != 'success' && steps.chair_probe.outputs.token_4 != 'dead' && inputs.claude_code_oauth_token_4 != ''
       continue-on-error: true
       uses: anthropics/claude-code-action@v1
       with:
@@ -836,6 +896,7 @@ runs:
       if: >-
         steps.budget.outputs.over != 'true' &&
         steps.council_start.outputs.trivial != 'true' &&
+        steps.chair_api_key.outcome != 'success' &&
         steps.chair_primary.outcome != 'success' &&
         steps.chair_backup.outcome != 'success' &&
         steps.chair_third.outcome != 'success' &&
@@ -857,6 +918,7 @@ runs:
       if: >-
         steps.budget.outputs.over != 'true' &&
         steps.council_start.outputs.trivial != 'true' &&
+        steps.chair_api_key.outcome != 'success' &&
         steps.chair_primary.outcome != 'success' &&
         steps.chair_backup.outcome != 'success' &&
         steps.chair_third.outcome != 'success' &&
@@ -884,7 +946,8 @@ runs:
     - name: Clear council cache
       if: >-
         steps.budget.outputs.over != 'true' &&
-        (steps.chair_primary.outcome == 'success' ||
+        (steps.chair_api_key.outcome == 'success' ||
+         steps.chair_primary.outcome == 'success' ||
          steps.chair_backup.outcome == 'success' ||
          steps.chair_third.outcome == 'success' ||
          steps.chair_fourth.outcome == 'success' ||
@@ -969,6 +1032,8 @@ runs:
         GH_TOKEN: ${{ inputs.github_token }}
         VCR_PR: ${{ github.event.pull_request.number }}
         VCR_REPO: ${{ github.repository }}
+        A: ${{ steps.chair_api_key.outcome }}
+        AUTH_MODE: ${{ steps.auth.outputs.mode }}
         P: ${{ steps.chair_primary.outcome }}
         B: ${{ steps.chair_backup.outcome }}
         T: ${{ steps.chair_third.outcome }}
@@ -989,7 +1054,8 @@ runs:
         # Which step claims to have reviewed. Kept for the message only; the
         # claim is not what decides the outcome.
         claimed="none"
-        [ "$P" = "success" ] && claimed="primary"
+        [ "$A" = "success" ] && claimed="api_key"
+        [ "$claimed" = none ] && [ "$P" = "success" ] && claimed="primary"
         [ "$claimed" = none ] && [ "$B" = "success" ] && claimed="backup"
         [ "$claimed" = none ] && [ "$T" = "success" ] && claimed="third"
         [ "$claimed" = none ] && [ "$Q" = "success" ] && claimed="fourth"
@@ -1030,8 +1096,12 @@ runs:
           exit 0
         fi
 
-        echo "chair posted no review this run (claimed=$claimed; primary=$P, backup=${B:-skipped}, third=${T:-skipped}, fourth=${Q:-skipped}, fallback=${F:-skipped})"
-        echo "probe: token_1=$TOKEN_1 token_2=$TOKEN_2 token_3=$TOKEN_3 token_4=$TOKEN_4"
+        echo "chair posted no review this run (claimed=$claimed; auth=${AUTH_MODE:-oauth}, api_key=${A:-skipped}, primary=${P:-skipped}, backup=${B:-skipped}, third=${T:-skipped}, fourth=${Q:-skipped}, fallback=${F:-skipped})"
+        if [ "$AUTH_MODE" = "api_key" ]; then
+          echo "probe: skipped, this run authenticates with the anthropic_api_key input and consumes no seat"
+        else
+          echo "probe: token_1=$TOKEN_1 token_2=$TOKEN_2 token_3=$TOKEN_3 token_4=$TOKEN_4"
+        fi
         echo "A step that exits 0 without posting is the failure this gate exists to catch."
         echo "Most often: the pull request edits .github/workflows/vibecodereview.yml, and"
         echo "claude-code-action refuses to run when the workflow differs from the default branch."

@@ -199,15 +199,20 @@ async function main() {
       fs.rmSync(testDir, { recursive: true, force: true });
     }
 
-    // A CLI-backed seat with no oauth token must skip too, not shell out --
-    // even when the ambient env sets one, so the check stays offline.
+    // A CLI-backed seat with no credential must skip too, not shell out --
+    // even when the ambient env sets one, so the check stays offline. Both
+    // credentials are cleared: an API key authenticates the seat just as an
+    // OAuth token does, so leaving one set would put this check on the network.
     const savedToken = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+    const savedAnthropicKey = process.env.VCR_ANTHROPIC_API_KEY;
     delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
+    delete process.env.VCR_ANTHROPIC_API_KEY;
     let cliSkip;
     try {
       cliSkip = await callModel({ provider: "claude", model: "x", name: "X", lens: "correctness" }, "diff");
     } finally {
       if (savedToken !== undefined) process.env.CLAUDE_CODE_OAUTH_TOKEN = savedToken;
+      if (savedAnthropicKey !== undefined) process.env.VCR_ANTHROPIC_API_KEY = savedAnthropicKey;
     }
     if (!cliSkip.error?.includes("CLAUDE_CODE_OAUTH_TOKEN")) {
       throw new Error("selfcheck: claude missing-token path wrong: " + cliSkip.error);
