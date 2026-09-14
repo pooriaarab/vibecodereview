@@ -64,7 +64,7 @@ inputs:
     required: false
     default: "50"
   max_council_runs:
-    description: "Stop after this many reviews from claude[bot] on one pull request. A PR on its third review is not converging, and a fourth costs the same as the first. Set 0 to disable."
+    description: "Stop after this many reviews from claude[bot] on one pull request. A PR on its third review is not converging, and a fourth costs the same as the first. At the ceiling the check fails (not passes) with a needs-human label and PR comment explaining the stop -- a budget stop must read differently than a completed review. Set 0 to disable."
     required: false
     default: "3"
   council_timeout_ms:
@@ -1055,7 +1055,15 @@ runs:
       run: |
         set -uo pipefail
         if [ "$OVER_BUDGET" = "true" ]; then
-          echo "chair: skipped, the pull request is over budget"; exit 0
+          # A budget stop must not look like a review. Green is the dangerous
+          # direction here too: a green check on a PR that was never reviewed
+          # this push is indistinguishable from one that was. The "Route the
+          # pull request to a person" step already posted the comment and the
+          # needs-human label explaining *why* -- this failure is what makes
+          # the check page say *that* a stop happened at all, instead of
+          # reporting the same green tick a real review gets.
+          echo "chair: skipped, the pull request is over budget -- this is a budget stop, not a review verdict; see the needs-human label and PR comment"
+          exit 1
         fi
 
         # Which step claims to have reviewed. Kept for the message only; the
