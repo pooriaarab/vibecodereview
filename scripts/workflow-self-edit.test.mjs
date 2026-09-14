@@ -139,5 +139,14 @@ assert.ok(
   !/\$\{GITHUB_WORKFLOW_REF[%#]/.test(guardCode),
   "the detection step must not re-parse GITHUB_WORKFLOW_REF in shell; the @refs/ rule has one home",
 );
+// Forbidding the re-parse is only half a guard: deleting the ref from the
+// notice altogether also satisfies it, and leaves the step announcing that the
+// chair changed identity without saying which workflow caused it. Pin that the
+// notice still carries the ref, whole.
+assert.match(
+  guardCode,
+  /::notice::.*\$GITHUB_WORKFLOW_REF/,
+  "the notice must still name the workflow ref, or it reports a decision without its subject",
+);
 
 console.log("ok    workflow-self-edit");
