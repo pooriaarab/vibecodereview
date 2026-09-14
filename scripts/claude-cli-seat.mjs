@@ -108,6 +108,25 @@ export async function callClaudeCli(model, diff, auth, { instructions, timeoutMs
       },
       (err, stdout, stderr) => {
         if (err) {
+          // ENOENT means the `claude` binary itself is missing -- the install
+          // step did not run, or did not finish, before this seat spawned
+          // (VCR-163). That is an infrastructure failure, not a review
+          // verdict, and reads as one only if this branch is skipped: the
+          // member would otherwise carry a bare "spawn claude ENOENT" string
+          // indistinguishable from any other rejected call, and a clean
+          // "0 findings" council run would look identical to a council that
+          // never ran. Tag it the same way callModelWithFallback already
+          // tags an absent key ("skipped: X not set") so a member that never
+          // even tried is never confused with one that tried and found
+          // nothing -- `infra: true` here is the machine-readable form of
+          // that same distinction.
+          if (err.code === "ENOENT") {
+            return resolve({
+              model,
+              error: "infra: claude CLI binary not found (spawn ENOENT) -- the install step did not run before this council seat",
+              infra: true,
+            });
+          }
           // The CLI reports auth failures on STDOUT and exits 1, so stderr is
           // empty exactly when the reason matters most (dead/expired token).
           const why = err.killed
