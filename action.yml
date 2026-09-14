@@ -452,10 +452,40 @@ runs:
       shell: bash
       run: bash "${{ github.action_path }}/scripts/install-claude-cli.sh"
 
+    # claude-code-action gets its GitHub token by exchanging an OIDC token for
+    # an Anthropic GitHub App token, and that exchange is refused when this
+    # pull request edits the workflow file that invoked it. The control is
+    # right -- a pull request must not edit the reviewer that judges it -- but
+    # upstream treats the refusal as a SKIP rather than an error: it returns
+    # normally and the step exits 0 having reviewed nothing. The failover chain
+    # below reads `steps.chair_*.outcome`, so that self-skip counts as a
+    # success and no later chair runs.
+    #
+    # Retrying cannot help: the refusal is a property of the pull request, not
+    # of the token, so every seat skips identically. Upstream's own
+    # `skipped_due_to_workflow_validation_mismatch` output is set but never
+    # re-exported from its composite `outputs:` block, so it cannot be read
+    # after the fact either. Decide up front instead, and hand those chairs a
+    # token that `setupGitHubToken()` returns before it reaches the exchange.
+    - name: Detect a self-edited workflow
+      id: workflow_guard
+      if: steps.council_start.outputs.trivial != 'true'
+      shell: bash
+      env:
+        GITHUB_WORKFLOW_REF: ${{ github.workflow_ref }}
+      run: |
+        SELF_EDIT="$(node "${{ github.action_path }}/scripts/workflow-self-edit.mjs" pr.diff)"
+        echo "self_edit=$SELF_EDIT" >> "$GITHUB_OUTPUT"
+        if [ "$SELF_EDIT" = "true" ]; then
+          echo "::notice::this pull request edits its own workflow (${GITHUB_WORKFLOW_REF%@*}); the chair authenticates with the caller's token instead of the Claude app, and does not push fixes"
+        fi
+
     - name: Fix-cycle guard
       id: cycle
       if: steps.council_start.outputs.trivial != 'true'
       shell: bash
+      env:
+        VCR_SELF_EDIT: ${{ steps.workflow_guard.outputs.self_edit }}
       run: |
         # Count our own consecutive commits at HEAD. After the limit, stop
         # pushing fixes (comment-only) so review->fix->re-review can't loop
@@ -469,7 +499,12 @@ runs:
           [ "$AUTHOR" = "vibecodereview[bot]" ] || break
           COUNT=$((COUNT + 1))
         done < <(git log --format='%an' -"$((LIMIT + 3))")
-        if [ "$COUNT" -ge "$LIMIT" ] || [ "${{ inputs.can_push_fixes }}" = "false" ]; then
+        # A self-edited workflow moves the chair onto the caller's GITHUB_TOKEN,
+        # which carries no `workflows` scope: a push touching
+        # .github/workflows/** is rejected outright. A chair that tries anyway
+        # dies before it posts, which is the exact failure this detection
+        # exists to remove. So it reviews and does not push.
+        if [ "$COUNT" -ge "$LIMIT" ] || [ "${{ inputs.can_push_fixes }}" = "false" ] || [ "${VCR_SELF_EDIT:-}" = "true" ]; then
           echo "can_push=false" >> "$GITHUB_OUTPUT"
         else
           echo "can_push=true" >> "$GITHUB_OUTPUT"
@@ -820,6 +855,11 @@ runs:
       with:
         anthropic_api_key: ${{ inputs.anthropic_api_key }}
         use_commit_signing: true
+        # Empty on the normal path, so the OIDC exchange still runs and the
+        # review still posts as claude[bot] -- the login budget-guard.sh
+        # counts. Non-empty only for a self-edited workflow, where the
+        # exchange is refused and the alternative is no review at all.
+        github_token: ${{ steps.workflow_guard.outputs.self_edit == 'true' && inputs.github_token || '' }}
         allowed_bots: "*"
         prompt: ${{ steps.prompt.outputs.text }}
         claude_args: '--allowed-tools "Bash(gh api:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr review:*),Bash(gh pr comment:*),Bash(git:*),Bash(jq:*),Bash(cat:*),Bash(ls:*),Bash(head:*),Bash(wc:*),Read,Glob,Grep,Edit,Write,TodoWrite"'
@@ -832,6 +872,11 @@ runs:
       with:
         claude_code_oauth_token: ${{ inputs.claude_code_oauth_token }}
         use_commit_signing: true
+        # Empty on the normal path, so the OIDC exchange still runs and the
+        # review still posts as claude[bot] -- the login budget-guard.sh
+        # counts. Non-empty only for a self-edited workflow, where the
+        # exchange is refused and the alternative is no review at all.
+        github_token: ${{ steps.workflow_guard.outputs.self_edit == 'true' && inputs.github_token || '' }}
         allowed_bots: "*"
         prompt: ${{ steps.prompt.outputs.text }}
         claude_args: '--allowed-tools "Bash(gh api:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr review:*),Bash(gh pr comment:*),Bash(git:*),Bash(jq:*),Bash(cat:*),Bash(ls:*),Bash(head:*),Bash(wc:*),Read,Glob,Grep,Edit,Write,TodoWrite"'
@@ -860,6 +905,11 @@ runs:
       with:
         claude_code_oauth_token: ${{ inputs.claude_code_oauth_token_2 }}
         use_commit_signing: true
+        # Empty on the normal path, so the OIDC exchange still runs and the
+        # review still posts as claude[bot] -- the login budget-guard.sh
+        # counts. Non-empty only for a self-edited workflow, where the
+        # exchange is refused and the alternative is no review at all.
+        github_token: ${{ steps.workflow_guard.outputs.self_edit == 'true' && inputs.github_token || '' }}
         allowed_bots: "*"
         prompt: ${{ steps.prompt.outputs.text }}
         claude_args: '--allowed-tools "Bash(gh api:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr review:*),Bash(gh pr comment:*),Bash(git:*),Bash(jq:*),Bash(cat:*),Bash(ls:*),Bash(head:*),Bash(wc:*),Read,Glob,Grep,Edit,Write,TodoWrite"'
@@ -878,6 +928,11 @@ runs:
       with:
         claude_code_oauth_token: ${{ inputs.claude_code_oauth_token_3 }}
         use_commit_signing: true
+        # Empty on the normal path, so the OIDC exchange still runs and the
+        # review still posts as claude[bot] -- the login budget-guard.sh
+        # counts. Non-empty only for a self-edited workflow, where the
+        # exchange is refused and the alternative is no review at all.
+        github_token: ${{ steps.workflow_guard.outputs.self_edit == 'true' && inputs.github_token || '' }}
         allowed_bots: "*"
         prompt: ${{ steps.prompt.outputs.text }}
         claude_args: '--allowed-tools "Bash(gh api:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr review:*),Bash(gh pr comment:*),Bash(git:*),Bash(jq:*),Bash(cat:*),Bash(ls:*),Bash(head:*),Bash(wc:*),Read,Glob,Grep,Edit,Write,TodoWrite"'
@@ -896,6 +951,11 @@ runs:
       with:
         claude_code_oauth_token: ${{ inputs.claude_code_oauth_token_4 }}
         use_commit_signing: true
+        # Empty on the normal path, so the OIDC exchange still runs and the
+        # review still posts as claude[bot] -- the login budget-guard.sh
+        # counts. Non-empty only for a self-edited workflow, where the
+        # exchange is refused and the alternative is no review at all.
+        github_token: ${{ steps.workflow_guard.outputs.self_edit == 'true' && inputs.github_token || '' }}
         allowed_bots: "*"
         prompt: ${{ steps.prompt.outputs.text }}
         claude_args: '--allowed-tools "Bash(gh api:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr review:*),Bash(gh pr comment:*),Bash(git:*),Bash(jq:*),Bash(cat:*),Bash(ls:*),Bash(head:*),Bash(wc:*),Read,Glob,Grep,Edit,Write,TodoWrite"'
@@ -1066,6 +1126,7 @@ runs:
         TOKEN_3: ${{ steps.chair_probe.outputs.token_3 }}
         TOKEN_4: ${{ steps.chair_probe.outputs.token_4 }}
         STARTED_AT: ${{ steps.gate_start.outputs.at }}
+        SELF_EDIT: ${{ steps.workflow_guard.outputs.self_edit }}
       run: |
         set -uo pipefail
         if [ "$OVER_BUDGET" = "true" ]; then
@@ -1132,8 +1193,11 @@ runs:
           echo "probe: token_1=$TOKEN_1 token_2=$TOKEN_2 token_3=$TOKEN_3 token_4=$TOKEN_4"
         fi
         echo "A step that exits 0 without posting is the failure this gate exists to catch."
-        echo "Most often: the pull request edits .github/workflows/vibecodereview.yml, and"
-        echo "claude-code-action refuses to run when the workflow differs from the default branch."
+        echo "self_edit=${SELF_EDIT:-unset}. A pull request that edits its own workflow is"
+        echo "the usual cause, and it now has a remedy: self_edit=true moves the chair onto"
+        echo "the caller's token, which needs no OIDC exchange. So self_edit=true here means"
+        echo "that remedy itself failed, and self_edit=false means look elsewhere -- read the"
+        echo "chair step log rather than assuming this cause."
         exit 1
 
     # Observability only. Silent-fail inside the script. Never gates the review.
