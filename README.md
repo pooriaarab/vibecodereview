@@ -1,13 +1,68 @@
-<p align="center"><img src="assets/logo.jpg" width="128" alt="vibecodereview logo"></p>
+<p align="center">
+  <img src="assets/logo.jpg" width="128" alt="A clay ninja in a judge's robe">
+</p>
 
-# vibecodereview
+<p align="center">A council of AI models reviews your pull request, verifies every finding against the code, and pushes the fix.</p>
 
-**A council of AI models reviews your PR — many models, one check.**
+<p align="center">
+  <a href="https://www.npmjs.com/package/vibecodereview"><img src="https://img.shields.io/npm/v/vibecodereview" alt="npm version"></a>
+  <a href="https://github.com/pooriaarab/vibecodereview/actions"><img src="https://github.com/pooriaarab/vibecodereview/actions/workflows/vibecodereview.yml/badge.svg" alt="vibecodereview check"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="License MIT"></a>
+</p>
 
-Each model reviews the diff through a different lens, so they catch different
-things. Claude chairs: it verifies every claim against the code, drops false
-positives, fixes what it can confirm, pushes the fix, and posts one review. The
-check heals itself toward green.
+```
+Major — fixed. repo-standards/SKILL.md baked in a time-sensitive fleet count
+  [...] Reworded to "most public repos in this fleet had none" in 4976ff0.
+
+Major — open, not fixed. The PR body's "How I verified" section is stale [...]
+  This is the author's evidence to regenerate [...] so I'm flagging it rather
+  than rewriting the PR body myself.
+```
+
+<p align="center"><em>Two findings from one real review, on
+<a href="https://github.com/pooriaarab/skills/pull/434">pooriaarab/skills#434</a>.
+It fixed the first and pushed the commit. It declined to fix the second, because
+rewriting an author's own evidence would defeat the point of asking for it.</em></p>
+
+## Contents
+
+[Install](#install) · [Quick start](#quick-start) · [Why](#why) · [The council](#the-council) · [Costs](#what-a-fix-cycle-costs) · [Local diff](#review-a-local-diff-before-you-push) · [License](#license)
+
+## Install
+
+```bash
+npx vibecodereview init                        # writes .github/workflows/vibecodereview.yml
+npx vibecodereview secrets --repo owner/name   # prints the gh commands to set the keys
+```
+
+Set at least `CLAUDE_CODE_OAUTH_TOKEN`, from `claude setup-token`. Every other
+key is optional and each one adds a council member.
+
+## Quick start
+
+Open a pull request. The check runs, the council reviews it through separate
+lenses, and the chair posts one review. There is no second step.
+
+```
+$ gh pr checks 423 -R pooriaarab/scripts
+vibecodereview	pass	7m15s
+```
+
+A member with no key drops out. With no keys at all the council step is skipped
+and Claude reviews alone, so a provider outage never blocks a pull request.
+
+## Why
+
+For a solo maintainer or a small team whose agents open more pull requests than
+anyone can read carefully. Review costs what it always did; generation no longer
+does.
+
+CodeRabbit and Devin review a diff and leave comments for you to act on. This
+one verifies each finding against the code first, drops what it cannot confirm,
+fixes what it can, pushes that fix to your branch, and posts one review instead
+of many. The check heals itself toward green.
+
+Not for you if you want a reviewer that never writes to your branch. It commits.
 
 Part of the **Vibe Suite**.
 
@@ -19,7 +74,19 @@ verdict, self-healing fix.
 ▶ **[Watch the launch trailer](https://getvibe.dev/vibecodereview)** ·
 [16:9](assets/vibecodereview-trailer-16x9.mp4) · [9:16](assets/vibecodereview-trailer-9x16.mp4)
 
-## The council
+## How it works
+
+A pull request opens. The action routes the delta to the lenses that can speak
+to the files it touches, and calls each provider directly. Every member returns
+findings independently. Claude chairs: it checks each claim against the code,
+drops what it cannot confirm, fixes what it can, pushes that commit to the
+branch, and posts one review.
+
+A trivial delta, such as a lockfile or docs-only push, skips the council
+entirely before any lens is dispatched.
+
+### The council
+
 
 | Member | Provider (called directly) | Secret | Lens |
 | --- | --- | --- | --- |
@@ -106,7 +173,7 @@ not merge until a human squashed the bot's commit away. That happened twice in
 [pooriaarab/scripts](https://github.com/pooriaarab/scripts) before this was fixed.
 Attribution belongs in the PR body as `Assisted-by:`, written by the author.
 
-## Use it in a repo
+## Configure it in a repo
 
 ```bash
 npx vibecodereview init          # writes .github/workflows/vibecodereview.yml
@@ -391,3 +458,11 @@ Exposes one tool, `council_review(diff)`. Provider keys come from the server env
   CI uses each provider's **API key**. Only Claude's OAuth token ports to CI.
 - Rotate any key you paste into a chat or terminal history.
 - **Vibetrace Ingestion**: Supply the optional `VIBETRACE_INGEST_URL` and `VIBETRACE_INGEST_TOKEN` as repository secrets to forward completed council run trace metrics and records to a centralized telemetry ingest server. When unset, telemetry traces are stored under `RUNNER_TEMP` as JSONL files.
+
+## Contributing
+
+See [CONTRIBUTING.md](https://github.com/pooriaarab/.github/blob/main/CONTRIBUTING.md).
+
+## License
+
+MIT. See [LICENSE](LICENSE).
