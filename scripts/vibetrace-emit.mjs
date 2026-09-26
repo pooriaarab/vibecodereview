@@ -12,6 +12,7 @@
 // GITHUB_REPOSITORY, VCR_PR / GITHUB_PR_NUMBER, GITHUB_HEAD_REF,
 // VCR_ISSUE / OFFROUTER_ISSUE, VCR_PR_BODY
 
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { buildChairRecord, buildCouncilRecord } from "./vibetrace-records.mjs";
@@ -31,9 +32,24 @@ function readOptional(file) {
   }
 }
 
+// The chair writes verdicts to a checkout-root scratch path (git-ignored, not
+// committed). A pull request can also commit a file at that same path, and it
+// would be present at that path before the chair ever runs. A tracked file is
+// therefore never this run's own scratch write -- trust nothing there,
+// regardless of what a later legitimate write did to its bytes.
+function isGitTracked(file) {
+  try {
+    execFileSync("git", ["ls-files", "--error-unmatch", "--", file], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function readVerdicts(file) {
   if (!file) return { missing: true };
   if (!fs.existsSync(file)) return { missing: true };
+  if (isGitTracked(file)) return { missing: true };
   try {
     return { missing: false, content: fs.readFileSync(file, "utf8") };
   } catch {
