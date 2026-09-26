@@ -417,6 +417,7 @@ runs:
         export VCR_CARRY_FILE="$PWD/council-carry.next.md"
         export VCR_STATS_FILE="$PWD/council-stats.json"
         printf 'VCR_STATS_FILE=%s\n' "$VCR_STATS_FILE" >> "$GITHUB_ENV"
+<<<<<<< HEAD
         # The chair's verdicts live under .git/, not the tracked tree. A path in
         # the workspace root is the PR's own tree: a pull request could commit a
         # file there and have it read back as this run's real verdict. Under
@@ -424,7 +425,14 @@ runs:
         # place a file there, and `git add -A` never stages .git/ internals —
         # the same invariants RUNNER_TEMP had, without sitting outside checkout.
         printf 'VCR_CHAIR_VERDICTS=%s\n' "$(git rev-parse --absolute-git-dir)/vcr-chair-verdicts.json" >> "$GITHUB_ENV"
+=======
+        # Chair verdicts: checkout-root scratch file in info/exclude (same idiom
+        # as council-carry.next.md). RUNNER_TEMP is outside Claude Code's write
+        # sandbox; paths under .git/ are treated as sensitive and blocked too.
+        printf 'VCR_CHAIR_VERDICTS=%s\n' "$PWD/.vcr-chair-verdicts.json" >> "$GITHUB_ENV"
+>>>>>>> d9921fe (Use excluded checkout-root path for chair verdicts.)
         printf '%s\n' /council-carry.next.md >> "$(git rev-parse --git-dir)/info/exclude"
+        printf '%s\n' /.vcr-chair-verdicts.json >> "$(git rev-parse --git-dir)/info/exclude"
         # Classify here, before the CLI install and token probe, so a docs-only
         # delta can skip every model chair. Fail open: only an exact `true`
         # skips the chair. A crash, a missing file, or anything else keeps it.
@@ -613,7 +621,7 @@ runs:
            approval that would supersede the block. Only a human dismissing the review
            can. See issue #43.
         6c. Before posting your review, Write your verdicts file to the ABSOLUTE path in the
-           `VCR_CHAIR_VERDICTS` environment variable (under `.git/`, inside the checkout but
+           `VCR_CHAIR_VERDICTS` environment variable (checkout-root scratch excluded from git,
            never part of this pull request's tracked tree). Give it your verdict and
            one disposition per council finding. Read the `<!-- vibetrace:findings-meta` block at the end of
            `council-findings.md` for finding ids. JSON shape:
