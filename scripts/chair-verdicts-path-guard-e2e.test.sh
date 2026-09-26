@@ -86,4 +86,22 @@ if "${CLI[@]}" "chair-verdicts.json" 2>/dev/null; then
 fi
 pass "git-tracked scratch path rejected"
 
+# --- tracked path via parent symlink alias to repo root: must reject (#201) ---
+ALIAS_TRACKED="$WORK/alias-tracked"
+mkdir -p "$ALIAS_TRACKED"
+cd "$ALIAS_TRACKED"
+git init -q
+git config user.email "guard-e2e@test.example"
+git config user.name "Guard E2E"
+echo init > README.md
+echo '{}' > chair-verdicts.json
+git add README.md chair-verdicts.json
+git commit -q -m track
+ln -s "$ALIAS_TRACKED" "$WORK/repo-alias"
+LEX_TRACKED="$WORK/repo-alias/chair-verdicts.json"
+if "${CLI[@]}" "$LEX_TRACKED" 2>/dev/null; then
+  fail "git-tracked path via symlink parent alias must be rejected"
+fi
+pass "git-tracked path via symlink parent alias rejected"
+
 echo "chair-verdicts-path-guard-e2e passed"

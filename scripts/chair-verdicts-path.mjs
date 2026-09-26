@@ -58,6 +58,33 @@ function gitRepositoryTopLevel(cwd = process.cwd()) {
 }
 
 /**
+ * True when `rel` escapes the repository root (not e.g. a `..foo` directory name).
+ *
+ * @param {string} rel path.relative(topLevel, abs)
+ */
+function isOutsideRepository(rel) {
+  return rel === ".." || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel);
+}
+
+/**
+ * Map a lexical scratch path to the physical path git indexes (#201 symlink alias).
+ *
+ * @param {string} abs
+ */
+function canonicalPathForGitTracking(abs) {
+  try {
+    return fs.realpathSync.native(abs);
+  } catch (err) {
+    if (err && typeof err === "object" && "code" in err && err.code === "ENOENT") {
+      const parent = path.dirname(abs);
+      const base = path.basename(abs);
+      return path.join(fs.realpathSync.native(parent), base);
+    }
+    throw err;
+  }
+}
+
+/**
  * @param {string} file path relative to cwd or absolute
  * @param {string} [cwd]
  * @returns {boolean}
@@ -66,8 +93,9 @@ function gitRepositoryTopLevel(cwd = process.cwd()) {
 export function isGitTracked(file, cwd = process.cwd()) {
   const topLevel = gitRepositoryTopLevel(cwd);
   const abs = path.isAbsolute(file) ? file : path.resolve(cwd, file);
-  const rel = path.relative(topLevel, abs);
-  if (rel.startsWith("..") || path.isAbsolute(rel)) {
+  const canonicalAbs = canonicalPathForGitTracking(abs);
+  const rel = path.relative(topLevel, canonicalAbs);
+  if (isOutsideRepository(rel)) {
     return false;
   }
   const r = spawnSync("git", ["ls-files", "--error-unmatch", "--", rel], {
@@ -115,17 +143,39 @@ export function resolveWriteTarget(file, cwd = process.cwd()) {
  * @returns {string | null}
  */
 function scratchSymlinkUnsafeReason(abs) {
-  try {
-    if (fs.lstatSync(abs).isSymbolicLink()) {
-      return `symlink at chair verdicts path ${abs}`;
+  const root = path.parse(abs).root;
+  let probe = abs;
+  while (true) {
+    try {
+      if (fs.lstatSync(probe).isSymbolicLink()) {
+        if (probe === abs) {
+          return `symlink at chair verdicts path ${abs}`;
+        }
+        return `symlink in chair verdicts path at ${probe}`;
+      }
+    } catch (err) {
+      if (err && typeof err === "object" && "code" in err && err.code === "ENOENT") {
+        if (probe === abs) {
+          const parent = path.dirname(probe);
+          if (parent === probe || parent === root) {
+            return null;
+          }
+          probe = parent;
+          continue;
+        }
+        return `chair verdicts path could not be inspected (${abs})`;
+      }
+      return `chair verdicts path could not be inspected (${abs})`;
     }
-  } catch (err) {
-    if (err && typeof err === "object" && "code" in err && err.code === "ENOENT") {
+    if (probe === root) {
       return null;
     }
-    return `chair verdicts path could not be inspected (${abs})`;
+    const parent = path.dirname(probe);
+    if (parent === probe) {
+      return null;
+    }
+    probe = parent;
   }
-  return null;
 }
 
 /**

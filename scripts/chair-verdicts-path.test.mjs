@@ -8,6 +8,7 @@ import {
   assertChairVerdictsPathSafe,
   chairVerdictsPathUnsafeReason,
   defaultChairVerdictsPath,
+  isGitTracked,
 } from "./chair-verdicts-path.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -94,9 +95,59 @@ if (!safeAssert.ok) {
   console.log("ok - assertChairVerdictsPathSafe passes on empty checkout");
 }
 
+const aliasRepo = fs.mkdtempSync(path.join(os.tmpdir(), "vcr-chair-alias-"));
+git(aliasRepo, "init", "-q");
+git(aliasRepo, "config", "user.email", "path@test.example");
+git(aliasRepo, "config", "user.name", "Path Test");
+fs.writeFileSync(path.join(aliasRepo, "README.md"), "init\n");
+fs.writeFileSync(path.join(aliasRepo, "chair-verdicts.json"), '{"verdict":"approve"}\n');
+git(aliasRepo, "add", "README.md", "chair-verdicts.json");
+git(aliasRepo, "commit", "-q", "-m", "track");
+const aliasParent = fs.mkdtempSync(path.join(os.tmpdir(), "vcr-chair-alias-parent-"));
+const aliasLink = path.join(aliasParent, "repo-alias");
+fs.symlinkSync(aliasRepo, aliasLink);
+const lexicalTracked = path.join(aliasLink, "chair-verdicts.json");
+if (!isGitTracked(lexicalTracked, aliasRepo)) {
+  console.error("FAIL tracked path via symlink parent alias must be detected");
+  failed++;
+} else {
+  console.log("ok - isGitTracked canonicalizes symlink parent alias");
+}
+const aliasReason = chairVerdictsPathUnsafeReason(lexicalTracked, aliasRepo);
+if (
+  !aliasReason ||
+  (!aliasReason.includes("git-tracked") && !aliasReason.includes("symlink"))
+) {
+  console.error("FAIL tracked alias path must be unsafe", aliasReason);
+  failed++;
+} else {
+  console.log("ok - chairVerdictsPathUnsafeReason rejects tracked alias path");
+}
+
+const dotdotFooRepo = fs.mkdtempSync(path.join(os.tmpdir(), "vcr-chair-dotdotfoo-"));
+git(dotdotFooRepo, "init", "-q");
+git(dotdotFooRepo, "config", "user.email", "path@test.example");
+git(dotdotFooRepo, "config", "user.name", "Path Test");
+const dotdotDir = path.join(dotdotFooRepo, "..foo");
+fs.mkdirSync(dotdotDir);
+fs.writeFileSync(path.join(dotdotFooRepo, "README.md"), "init\n");
+fs.writeFileSync(path.join(dotdotDir, "chair-verdicts.json"), '{"verdict":"approve"}\n');
+git(dotdotFooRepo, "add", "README.md", "..foo/chair-verdicts.json");
+git(dotdotFooRepo, "commit", "-q", "-m", "track dotdotfoo");
+const dotdotVerdicts = path.join(dotdotDir, "chair-verdicts.json");
+if (!isGitTracked(dotdotVerdicts, dotdotFooRepo)) {
+  console.error("FAIL ..foo/chair-verdicts.json must be detected as tracked");
+  failed++;
+} else {
+  console.log("ok - isGitTracked does not treat ..foo as parent escape");
+}
+
 fs.rmSync(repo, { recursive: true, force: true });
 fs.rmSync(symlinkRepo, { recursive: true, force: true });
 fs.rmSync(safeRepo, { recursive: true, force: true });
+fs.rmSync(aliasRepo, { recursive: true, force: true });
+fs.rmSync(aliasParent, { recursive: true, force: true });
+fs.rmSync(dotdotFooRepo, { recursive: true, force: true });
 
 if (failed) process.exit(1);
 console.log("chair-verdicts-path tests passed");
