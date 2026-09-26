@@ -39,3 +39,6 @@ jobs:
       - name: chair-verdicts-path
         if: ${{ !cancelled() }}
         run: bash scripts/chair-verdicts-path.test.sh
+      - name: chair-verdicts-path-guard-e2e
+        if: ${{ !cancelled() }}
+        run: bash scripts/chair-verdicts-path-guard-e2e.test.sh
