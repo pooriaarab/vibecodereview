@@ -15,9 +15,6 @@ export function defaultChairVerdictsPath(cwd = process.cwd()) {
   return path.join(cwd, CHAIR_VERDICTS_BASENAME);
 }
 
-/**
- * @param {string} cwd
- */
 function runRevParseTopLevel(cwd) {
   return spawnSync("git", ["rev-parse", "--show-toplevel"], {
     cwd,
@@ -43,11 +40,6 @@ export function gitCheckoutUnsafeReason(cwd = process.cwd()) {
   return null;
 }
 
-/**
- * @param {string} cwd
- * @returns {string}
- * @throws when cwd is not a git checkout
- */
 function gitRepositoryTopLevel(cwd = process.cwd()) {
   const r = runRevParseTopLevel(cwd);
   if (r.status !== 0 || !r.stdout?.trim()) {
@@ -57,20 +49,10 @@ function gitRepositoryTopLevel(cwd = process.cwd()) {
   return r.stdout.trim();
 }
 
-/**
- * True when `rel` escapes the repository root (not e.g. a `..foo` directory name).
- *
- * @param {string} rel path.relative(topLevel, abs)
- */
 function isOutsideRepository(rel) {
   return rel === ".." || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel);
 }
 
-/**
- * Map a lexical scratch path to the physical path git indexes (#201 symlink alias).
- *
- * @param {string} abs
- */
 function canonicalPathForGitTracking(abs) {
   try {
     return fs.realpathSync.native(abs);
@@ -138,9 +120,6 @@ export function resolveWriteTarget(file, cwd = process.cwd()) {
   return abs;
 }
 
-/**
- * @param {unknown} err
- */
 function isEnoent(err) {
   return err && typeof err === "object" && "code" in err && err.code === "ENOENT";
 }
@@ -148,7 +127,6 @@ function isEnoent(err) {
 /**
  * @param {string} probe
  * @param {string} originalAbs
- * @returns {string | null}
  */
 function symlinkReasonAt(probe, originalAbs) {
   if (!fs.lstatSync(probe).isSymbolicLink()) {
@@ -160,10 +138,6 @@ function symlinkReasonAt(probe, originalAbs) {
   return `symlink in chair verdicts path at ${probe}`;
 }
 
-/**
- * @param {string} abs absolute path
- * @returns {string | null}
- */
 function scratchSymlinkUnsafeReason(abs) {
   const root = path.parse(abs).root;
   let probe = abs;

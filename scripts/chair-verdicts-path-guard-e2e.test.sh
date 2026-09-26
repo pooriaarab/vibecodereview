@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# Fail-closed guard scenarios from PR #200 root review (#201).
-# Run from repo root: bash scripts/chair-verdicts-path-guard-e2e.test.sh
+# Fail-closed guard scenarios (#201). Run: bash scripts/chair-verdicts-path-guard-e2e.test.sh
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -18,7 +17,6 @@ pass() {
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
-# --- not a git repository: must fail closed (not pass as untracked) ---
 NOGIT="$WORK/nogit"
 mkdir -p "$NOGIT"
 cd "$NOGIT"
@@ -27,7 +25,6 @@ if "${CLI[@]}" "chair-verdicts.json" 2>/dev/null; then
 fi
 pass "non-git checkout rejected"
 
-# --- broken .git (not a real repository) ---
 BROKEN="$WORK/broken"
 mkdir -p "$BROKEN/.git"
 cd "$BROKEN"
@@ -36,7 +33,6 @@ if "${CLI[@]}" "chair-verdicts.json" 2>/dev/null; then
 fi
 pass "broken git metadata rejected"
 
-# --- healthy repo: untracked scratch path still passes ---
 GOOD="$WORK/good"
 mkdir -p "$GOOD"
 cd "$GOOD"
@@ -51,7 +47,6 @@ if ! "${CLI[@]}" "chair-verdicts.json"; then
 fi
 pass "untracked scratch path allowed"
 
-# --- symlink scratch to outside untracked file: must reject (no follow) ---
 OUTSIDE="$WORK/outside-target"
 mkdir -p "$OUTSIDE"
 echo '{}' >"$OUTSIDE/verdicts.json"
@@ -70,7 +65,6 @@ if "${CLI[@]}" "chair-verdicts.json" 2>/dev/null; then
 fi
 pass "symlink scratch path rejected"
 
-# --- tracked scratch path still rejected ---
 TRACKED="$WORK/tracked"
 mkdir -p "$TRACKED"
 cd "$TRACKED"
@@ -86,7 +80,6 @@ if "${CLI[@]}" "chair-verdicts.json" 2>/dev/null; then
 fi
 pass "git-tracked scratch path rejected"
 
-# --- tracked path via parent symlink alias to repo root: must reject (#201) ---
 ALIAS_TRACKED="$WORK/alias-tracked"
 mkdir -p "$ALIAS_TRACKED"
 cd "$ALIAS_TRACKED"
