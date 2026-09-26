@@ -117,13 +117,21 @@ function buildRecord(kind) {
     const verdictsFile = arg("--verdicts", "chair-verdicts.json");
     const verdicts = readVerdicts(verdictsFile);
     if (verdicts.missing) {
+      console.error(`vibetrace-emit: chair verdicts missing or untrusted at ${verdictsFile || "(none)"}`);
       return buildChairRecord({ attribution: attr, verdictsMissing: true });
     }
     // Pass the report too, or coverage is never checked in production and the
     // validation exists only in tests.
     const findingsFile = arg("--findings", "council-findings.md");
     const findingsMarkdown = fs.existsSync(findingsFile) ? fs.readFileSync(findingsFile, "utf8") : undefined;
-    return buildChairRecord({ attribution: attr, verdictsJson: verdicts.content, findingsMarkdown });
+    const built = buildChairRecord({ attribution: attr, verdictsJson: verdicts.content, findingsMarkdown });
+    if (built.ok && built.record.dispositionsMissing === false) {
+      const n = Array.isArray(built.record.dispositions) ? built.record.dispositions.length : 0;
+      console.log(
+        `vibetrace-emit: chair verdicts consumed from ${verdictsFile} (verdict=${built.record.verdict}, dispositions=${n})`,
+      );
+    }
+    return built;
   }
   return { ok: false, reason: `unsupported type; only review.council and review.chair` };
 }

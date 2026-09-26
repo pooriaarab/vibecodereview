@@ -420,9 +420,11 @@ runs:
         # Chair verdicts: checkout-root scratch file in info/exclude (same idiom
         # as council-carry.next.md). RUNNER_TEMP is outside Claude Code's write
         # sandbox; paths under .git/ are treated as sensitive and blocked too.
-        printf 'VCR_CHAIR_VERDICTS=%s\n' "$PWD/.vcr-chair-verdicts.json" >> "$GITHUB_ENV"
+        # Use a visible filename (not a dotfile): Claude Code's sandbox treats
+        # many dot-prefixed paths as sensitive and blocks Write/Bash (#194).
+        printf 'VCR_CHAIR_VERDICTS=%s\n' "$PWD/chair-verdicts.json" >> "$GITHUB_ENV"
         printf '%s\n' /council-carry.next.md >> "$(git rev-parse --git-dir)/info/exclude"
-        printf '%s\n' /.vcr-chair-verdicts.json >> "$(git rev-parse --git-dir)/info/exclude"
+        printf '%s\n' /chair-verdicts.json >> "$(git rev-parse --git-dir)/info/exclude"
         # Classify here, before the CLI install and token probe, so a docs-only
         # delta can skip every model chair. Fail open: only an exact `true`
         # skips the chair. A crash, a missing file, or anything else keeps it.
@@ -530,6 +532,7 @@ runs:
         VCR_CANPUSH: ${{ steps.cycle.outputs.can_push }}
         VCR_CYCLES: ${{ steps.cycle.outputs.cycles }}
         VCR_REQUIRE_PROOF: ${{ inputs.require_proof }}
+        VCR_VERDICTS_PATH: ${{ env.VCR_CHAIR_VERDICTS }}
       run: |
         cat > "$RUNNER_TEMP/chair-prompt.txt" <<'VCR_PROMPT_EOF'
         You chair an LLM council reviewing PR #__PR__ in __REPO__.
@@ -611,9 +614,11 @@ runs:
            not trigger workflows for GITHUB_TOKEN pushes, so no later run posts the
            approval that would supersede the block. Only a human dismissing the review
            can. See issue #43.
-        6c. Before posting your review, Write your verdicts file to the ABSOLUTE path in the
-           `VCR_CHAIR_VERDICTS` environment variable (checkout-root scratch excluded from git,
-           never part of this pull request's tracked tree). Give it your verdict and
+        6c. Before posting your review, use the Write tool only (not Bash) to write your
+           verdicts file to this exact absolute path (checkout-root scratch excluded from git,
+           never part of this pull request's tracked tree):
+             __VERDICTS_PATH__
+           Give it your verdict and
            one disposition per council finding. Read the `<!-- vibetrace:findings-meta` block at the end of
            `council-findings.md` for finding ids. JSON shape:
              {
@@ -645,6 +650,11 @@ runs:
         PROMPT="${PROMPT//__BRANCH__/$VCR_BRANCH}"
         PROMPT="${PROMPT//__CANPUSH__/$VCR_CANPUSH}"
         PROMPT="${PROMPT//__CYCLES__/$VCR_CYCLES}"
+        if [ -z "${VCR_VERDICTS_PATH:-}" ]; then
+          echo "::error::chair verdicts path missing (VCR_CHAIR_VERDICTS was not set in council_start)"
+          exit 1
+        fi
+        PROMPT="${PROMPT//__VERDICTS_PATH__/$VCR_VERDICTS_PATH}"
         # Mirror council-config.mjs: when proof is off, drop the whole bullet
         # rather than interpolate the flag into a still-mandatory instruction
         # the chair could follow regardless of what the flag says.
