@@ -78,6 +78,7 @@ ok(trivial.get("continue_on_error") is True,
 
 chair_names = [
     "Install Claude Code CLI",
+    "Detect a self-edited workflow",
     "Fix-cycle guard",
     "Build chair prompt",
     "Probe chair tokens",
@@ -92,13 +93,16 @@ chair_names = [
     "Clear stale chair-verdicts.json before fallback",
 ]
 skip = "steps.council_start.outputs.trivial != 'true'"
+budget = "steps.budget.outputs.over != 'true'"
 for name in chair_names:
     step = steps.get(name, {})
-    ok(skip in (step.get("if") or ""), f"{name} skips when the delta is trivial")
+    step_if = step.get("if") or ""
+    ok(skip in step_if, f"{name} skips when the delta is trivial")
+    ok(budget in step_if, f"{name} skips when the pull request is over budget")
 
 primary = steps.get("Chair review (primary token)", {})
 primary_if = primary.get("if") or ""
-ok("steps.budget.outputs.over != 'true'" in primary_if, "non-trivial chair still requires the budget guard")
+ok(budget in primary_if, "non-trivial chair still requires the budget guard")
 ok("steps.chair_probe.outputs.token_1 != 'dead'" in primary_if, "non-trivial chair still requires a live primary token")
 ok(primary.get("uses") == "anthropics/claude-code-action@v1", "non-trivial chair still uses claude-code-action")
 

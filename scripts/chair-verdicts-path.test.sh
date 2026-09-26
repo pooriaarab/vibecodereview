@@ -11,14 +11,14 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ACTION_YML="$ROOT/action.yml"
 
 VERDICTS_LINE="$(grep -m1 "printf 'VCR_CHAIR_VERDICTS=" "$ACTION_YML")"
-EXCLUDE_LINE="$(grep -m1 '/\.vcr-chair-verdicts\.json.*info/exclude' "$ACTION_YML")"
+EXCLUDE_LINE="$(grep -m1 '/chair-verdicts\.json.*info/exclude' "$ACTION_YML")"
 
 if [[ -z "$VERDICTS_LINE" ]]; then
   echo "FAIL could not find the VCR_CHAIR_VERDICTS printf line in action.yml" >&2
   exit 1
 fi
 if [[ -z "$EXCLUDE_LINE" ]]; then
-  echo "FAIL could not find the .vcr-chair-verdicts.json info/exclude line in action.yml" >&2
+  echo "FAIL could not find the chair-verdicts.json info/exclude line in action.yml" >&2
   exit 1
 fi
 
@@ -42,7 +42,7 @@ eval "$EXCLUDE_LINE"
 source "$WORK/env.out"
 
 case "$VCR_CHAIR_VERDICTS" in
-  "$PWD/.vcr-chair-verdicts.json") ;;
+  "$PWD/chair-verdicts.json") ;;
   *)
     echo "FAIL VCR_CHAIR_VERDICTS must be checkout-root, got: $VCR_CHAIR_VERDICTS" >&2
     exit 1
@@ -60,8 +60,8 @@ if ! test -f "$VCR_CHAIR_VERDICTS"; then
   exit 1
 fi
 
-if ! grep -qx '/.vcr-chair-verdicts.json' "$(git rev-parse --git-dir)/info/exclude"; then
-  echo "FAIL info/exclude missing /.vcr-chair-verdicts.json" >&2
+if ! grep -qx '/chair-verdicts.json' "$(git rev-parse --git-dir)/info/exclude"; then
+  echo "FAIL info/exclude missing /chair-verdicts.json" >&2
   exit 1
 fi
 

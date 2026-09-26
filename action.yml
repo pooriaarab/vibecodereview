@@ -420,9 +420,11 @@ runs:
         # Chair verdicts: checkout-root scratch file in info/exclude (same idiom
         # as council-carry.next.md). RUNNER_TEMP is outside Claude Code's write
         # sandbox; paths under .git/ are treated as sensitive and blocked too.
-        printf 'VCR_CHAIR_VERDICTS=%s\n' "$PWD/.vcr-chair-verdicts.json" >> "$GITHUB_ENV"
+        # Use a visible filename (not a dotfile): Claude Code's sandbox treats
+        # many dot-prefixed paths as sensitive and blocks Write/Bash (#194).
+        printf 'VCR_CHAIR_VERDICTS=%s\n' "$PWD/chair-verdicts.json" >> "$GITHUB_ENV"
         printf '%s\n' /council-carry.next.md >> "$(git rev-parse --git-dir)/info/exclude"
-        printf '%s\n' /.vcr-chair-verdicts.json >> "$(git rev-parse --git-dir)/info/exclude"
+        printf '%s\n' /chair-verdicts.json >> "$(git rev-parse --git-dir)/info/exclude"
         # Classify here, before the CLI install and token probe, so a docs-only
         # delta can skip every model chair. Fail open: only an exact `true`
         # skips the chair. A crash, a missing file, or anything else keeps it.
@@ -438,7 +440,7 @@ runs:
         echo "council started (pid $(cat council.pid))"
 
     - name: Install Claude Code CLI
-      if: steps.council_start.outputs.trivial != 'true'
+      if: steps.budget.outputs.over != 'true' && steps.council_start.outputs.trivial != 'true'
       # anthropics/claude-code-action expects the Claude Code native binary at
       # ~/.local/bin/claude; this is the chair's own install, and it always
       # needs to run once the delta is non-trivial, independent of the council
@@ -467,7 +469,7 @@ runs:
     # token that `setupGitHubToken()` returns before it reaches the exchange.
     - name: Detect a self-edited workflow
       id: workflow_guard
-      if: steps.council_start.outputs.trivial != 'true'
+      if: steps.budget.outputs.over != 'true' && steps.council_start.outputs.trivial != 'true'
       shell: bash
       env:
         GITHUB_WORKFLOW_REF: ${{ github.workflow_ref }}
@@ -485,7 +487,7 @@ runs:
 
     - name: Fix-cycle guard
       id: cycle
-      if: steps.council_start.outputs.trivial != 'true'
+      if: steps.budget.outputs.over != 'true' && steps.council_start.outputs.trivial != 'true'
       shell: bash
       env:
         VCR_SELF_EDIT: ${{ steps.workflow_guard.outputs.self_edit }}
@@ -521,7 +523,7 @@ runs:
     # copies of a 40-line prompt that must never drift.
     - name: Build chair prompt
       id: prompt
-      if: steps.council_start.outputs.trivial != 'true'
+      if: steps.budget.outputs.over != 'true' && steps.council_start.outputs.trivial != 'true'
       shell: bash
       env:
         VCR_PR: ${{ github.event.pull_request.number }}
@@ -530,13 +532,14 @@ runs:
         VCR_CANPUSH: ${{ steps.cycle.outputs.can_push }}
         VCR_CYCLES: ${{ steps.cycle.outputs.cycles }}
         VCR_REQUIRE_PROOF: ${{ inputs.require_proof }}
+        VCR_VERDICTS_PATH: ${{ env.VCR_CHAIR_VERDICTS }}
       run: |
         cat > "$RUNNER_TEMP/chair-prompt.txt" <<'VCR_PROMPT_EOF'
         You chair an LLM council reviewing PR #__PR__ in __REPO__.
         Branch: __BRANCH__. Can push fixes: __CANPUSH__ (automated fix cycles so far: __CYCLES__).
         The council report records the exact reviewed head SHA. Include its `Reviewed head:` line in your review summary.
 
-        LOOP GUARD: if "Can push fixes" is false, DO NOT push any commits — leave a review comment only. If a prior cycle already tried to fix an issue and it persists, stop fixing it and flag it for a human instead of pushing again.
+        LOOP GUARD: if "Can push fixes" is false, DO NOT push any commits (skip step 5 entirely). That is only a push restriction — it does NOT pick your `gh pr review` disposition. Still choose --approve, --request-changes, or --comment per step 6 from what remains open after your review. If a prior cycle already tried to fix an issue and it persists, stop fixing it and flag it for a human instead of pushing again.
 
         Council members each reviewed this PR through one lens and wrote findings to
         `council-findings.md`, under a heading per member that names its lens. You are the
@@ -611,9 +614,11 @@ runs:
            not trigger workflows for GITHUB_TOKEN pushes, so no later run posts the
            approval that would supersede the block. Only a human dismissing the review
            can. See issue #43.
-        6c. Before posting your review, Write your verdicts file to the ABSOLUTE path in the
-           `VCR_CHAIR_VERDICTS` environment variable (checkout-root scratch excluded from git,
-           never part of this pull request's tracked tree). Give it your verdict and
+        6c. Before posting your review, use the Write tool only (not Bash) to write your
+           verdicts file to this exact absolute path (checkout-root scratch excluded from git,
+           never part of this pull request's tracked tree):
+             __VERDICTS_PATH__
+           Give it your verdict and
            one disposition per council finding. Read the `<!-- vibetrace:findings-meta` block at the end of
            `council-findings.md` for finding ids. JSON shape:
              {
@@ -645,6 +650,11 @@ runs:
         PROMPT="${PROMPT//__BRANCH__/$VCR_BRANCH}"
         PROMPT="${PROMPT//__CANPUSH__/$VCR_CANPUSH}"
         PROMPT="${PROMPT//__CYCLES__/$VCR_CYCLES}"
+        if [ -z "${VCR_VERDICTS_PATH:-}" ]; then
+          echo "::error::chair verdicts path missing (VCR_CHAIR_VERDICTS was not set in council_start)"
+          exit 1
+        fi
+        PROMPT="${PROMPT//__VERDICTS_PATH__/$VCR_VERDICTS_PATH}"
         # Mirror council-config.mjs: when proof is off, drop the whole bullet
         # rather than interpolate the flag into a still-mandatory instruction
         # the chair could follow regardless of what the flag says.
@@ -713,7 +723,7 @@ runs:
     # fail-open rule keeps holding.
     - name: Probe chair tokens
       id: chair_probe
-      if: steps.council_start.outputs.trivial != 'true' && inputs.anthropic_api_key == ''
+      if: steps.budget.outputs.over != 'true' && steps.council_start.outputs.trivial != 'true' && inputs.anthropic_api_key == ''
       shell: bash
       env:
         VCR_T1: ${{ inputs.claude_code_oauth_token }}
