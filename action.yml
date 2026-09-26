@@ -440,7 +440,7 @@ runs:
         echo "council started (pid $(cat council.pid))"
 
     - name: Install Claude Code CLI
-      if: steps.council_start.outputs.trivial != 'true'
+      if: steps.budget.outputs.over != 'true' && steps.council_start.outputs.trivial != 'true'
       # anthropics/claude-code-action expects the Claude Code native binary at
       # ~/.local/bin/claude; this is the chair's own install, and it always
       # needs to run once the delta is non-trivial, independent of the council
@@ -469,7 +469,7 @@ runs:
     # token that `setupGitHubToken()` returns before it reaches the exchange.
     - name: Detect a self-edited workflow
       id: workflow_guard
-      if: steps.council_start.outputs.trivial != 'true'
+      if: steps.budget.outputs.over != 'true' && steps.council_start.outputs.trivial != 'true'
       shell: bash
       env:
         GITHUB_WORKFLOW_REF: ${{ github.workflow_ref }}
@@ -487,7 +487,7 @@ runs:
 
     - name: Fix-cycle guard
       id: cycle
-      if: steps.council_start.outputs.trivial != 'true'
+      if: steps.budget.outputs.over != 'true' && steps.council_start.outputs.trivial != 'true'
       shell: bash
       env:
         VCR_SELF_EDIT: ${{ steps.workflow_guard.outputs.self_edit }}
@@ -523,7 +523,7 @@ runs:
     # copies of a 40-line prompt that must never drift.
     - name: Build chair prompt
       id: prompt
-      if: steps.council_start.outputs.trivial != 'true'
+      if: steps.budget.outputs.over != 'true' && steps.council_start.outputs.trivial != 'true'
       shell: bash
       env:
         VCR_PR: ${{ github.event.pull_request.number }}
@@ -723,7 +723,7 @@ runs:
     # fail-open rule keeps holding.
     - name: Probe chair tokens
       id: chair_probe
-      if: steps.council_start.outputs.trivial != 'true' && inputs.anthropic_api_key == ''
+      if: steps.budget.outputs.over != 'true' && steps.council_start.outputs.trivial != 'true' && inputs.anthropic_api_key == ''
       shell: bash
       env:
         VCR_T1: ${{ inputs.claude_code_oauth_token }}
