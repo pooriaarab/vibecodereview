@@ -536,7 +536,7 @@ runs:
         Branch: __BRANCH__. Can push fixes: __CANPUSH__ (automated fix cycles so far: __CYCLES__).
         The council report records the exact reviewed head SHA. Include its `Reviewed head:` line in your review summary.
 
-        LOOP GUARD: if "Can push fixes" is false, DO NOT push any commits — leave a review comment only. If a prior cycle already tried to fix an issue and it persists, stop fixing it and flag it for a human instead of pushing again.
+        LOOP GUARD: if "Can push fixes" is false, DO NOT push any commits (skip step 5 entirely). That is only a push restriction — it does NOT pick your `gh pr review` disposition. Still choose --approve, --request-changes, or --comment per step 6 from what remains open after your review. If a prior cycle already tried to fix an issue and it persists, stop fixing it and flag it for a human instead of pushing again.
 
         Council members each reviewed this PR through one lens and wrote findings to
         `council-findings.md`, under a heading per member that names its lens. You are the

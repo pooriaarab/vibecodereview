@@ -57,4 +57,24 @@ assert.ok(
     `Drop the list rather than syncing it — syncing postpones the drift instead of removing it.`,
 );
 
+// LOOP GUARD must not tie can_push=false to a comment-only verdict. Step 6 owns
+// disposition; the guard only blocks git pushes (issue #192, yaya run 36235965506).
+const loopGuard = prompt.match(/LOOP GUARD:[^\n]+/);
+assert.ok(loopGuard, "LOOP GUARD line missing from chair prompt");
+assert.match(
+  loopGuard[0],
+  /skip step 5/i,
+  "LOOP GUARD must tell the chair to skip pushes, not to pick a review disposition",
+);
+assert.doesNotMatch(
+  loopGuard[0],
+  /comment only/i,
+  "LOOP GUARD must not instruct comment-only reviews when pushes are disabled",
+);
+assert.match(
+  prompt,
+  /step 6.*--approve/is,
+  "chair prompt must still document step 6 --approve after LOOP GUARD",
+);
+
 console.log("chair prompt tests passed");
