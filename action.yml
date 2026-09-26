@@ -423,7 +423,7 @@ runs:
         # .git/ the Claude Code sandbox allows writes, nothing in a PR's diff can
         # place a file there, and `git add -A` never stages .git/ internals —
         # the same invariants RUNNER_TEMP had, without sitting outside checkout.
-        printf 'VCR_CHAIR_VERDICTS=%s\n' "$(git rev-parse --git-dir)/vcr-chair-verdicts.json" >> "$GITHUB_ENV"
+        printf 'VCR_CHAIR_VERDICTS=%s\n' "$(git rev-parse --absolute-git-dir)/vcr-chair-verdicts.json" >> "$GITHUB_ENV"
         printf '%s\n' /council-carry.next.md >> "$(git rev-parse --git-dir)/info/exclude"
         # Classify here, before the CLI install and token probe, so a docs-only
         # delta can skip every model chair. Fail open: only an exact `true`
