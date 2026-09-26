@@ -130,6 +130,13 @@ function buildRecord(kind) {
       console.log(
         `vibetrace-emit: chair verdicts consumed from ${verdictsFile} (verdict=${built.record.verdict}, dispositions=${n})`,
       );
+    } else if (built.ok && built.record.dispositionsMissing === true) {
+      // The file existed and was trusted, but the parsed content did not stand
+      // up on its own -- bad JSON, or disposition ids that don't match
+      // council-findings.md's meta block. Distinct from the "missing or
+      // untrusted" case above: here the chair did write, just not something usable.
+      const reason = built.record.dispositionsRejected ? `: ${built.record.dispositionsRejected}` : "";
+      console.error(`vibetrace-emit: chair verdicts at ${verdictsFile} parsed but unusable${reason}`);
     }
     return built;
   }
