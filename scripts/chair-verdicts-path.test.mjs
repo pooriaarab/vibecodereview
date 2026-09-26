@@ -72,11 +72,11 @@ git(symlinkRepo, "commit", "-q", "-m", "init");
 const linkPath = defaultChairVerdictsPath(symlinkRepo);
 fs.symlinkSync("tracked-secret.json", linkPath);
 const linkReason = chairVerdictsPathUnsafeReason(linkPath, symlinkRepo);
-if (!linkReason || !linkReason.includes("git-tracked")) {
-  console.error("FAIL symlink to tracked target must be unsafe", linkReason);
+if (!linkReason || !linkReason.includes("symlink")) {
+  console.error("FAIL symlink scratch path must be unsafe", linkReason);
   failed++;
 } else {
-  console.log("ok - symlink to tracked write target is rejected");
+  console.log("ok - symlink scratch path is rejected");
 }
 
 const safeRepo = fs.mkdtempSync(path.join(os.tmpdir(), "vcr-chair-safe-"));

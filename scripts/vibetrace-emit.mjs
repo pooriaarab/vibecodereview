@@ -48,7 +48,11 @@ function readVerdicts(file) {
     return { missing: true };
   }
   for (const target of targets) {
-    if (isGitTracked(target, cwd)) return { missing: true };
+    try {
+      if (isGitTracked(target, cwd)) return { missing: true };
+    } catch {
+      return { missing: true };
+    }
   }
   try {
     const readPath = resolveWriteTarget(file, cwd);
