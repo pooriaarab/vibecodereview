@@ -599,6 +599,11 @@ runs:
                left open: --comment. For each finding say plainly whether you
                fixed it or it remains open — never report an unfixed finding
                as fixed.
+             - The only findings you addressed this run came from
+               `Findings carried forward`, you re-checked each one, none remain
+               open as Major+, you found nothing new in the current delta, and
+               you pushed nothing: --approve (earlier cycles' open items that
+               you verified fixed do not by themselves force --comment).
              - You found nothing and pushed nothing: --approve.
            Never --approve in a run where you pushed fixes (use --comment).
            Do NOT --request-changes for a defect you repaired in this run. That blocks the
