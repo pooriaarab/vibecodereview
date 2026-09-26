@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { execFileSync, spawn, spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import http from "node:http";
 import os from "node:os";
@@ -304,48 +304,6 @@ if (chairMissing.status !== 0) {
     console.log("ok - missing chair-verdicts.json sets dispositionsMissing via CLI");
   }
 }
-const aliasEmitRepo = fs.mkdtempSync(path.join(os.tmpdir(), "vcr-chair-emit-alias-repo-"));
-const aliasEmitParent = fs.mkdtempSync(path.join(os.tmpdir(), "vcr-chair-emit-alias-parent-"));
-function gitEmit(cwd, ...args) {
-  execFileSync("git", args, { cwd, stdio: "ignore" });
-}
-gitEmit(aliasEmitRepo, "init", "-q");
-gitEmit(aliasEmitRepo, "config", "user.email", "emit@test.example");
-gitEmit(aliasEmitRepo, "config", "user.name", "Emit Test");
-fs.writeFileSync(path.join(aliasEmitRepo, "README.md"), "init\n");
-fs.writeFileSync(
-  path.join(aliasEmitRepo, "chair-verdicts.json"),
-  JSON.stringify({ verdict: "approve", dispositions: [{ id: "f1", disposition: "confirmed-open" }] }),
-);
-gitEmit(aliasEmitRepo, "add", "README.md", "chair-verdicts.json");
-gitEmit(aliasEmitRepo, "commit", "-q", "-m", "track");
-fs.symlinkSync(aliasEmitRepo, path.join(aliasEmitParent, "repo-alias"));
-const aliasVerdicts = path.join(aliasEmitParent, "repo-alias", "chair-verdicts.json");
-const aliasEmitFile = path.join(aliasEmitParent, "traces.jsonl");
-const aliasEmit = spawnSync(
-  process.execPath,
-  [script, "review.chair", "--verdicts", aliasVerdicts],
-  {
-    cwd: aliasEmitRepo,
-    encoding: "utf8",
-    env: { ...process.env, VIBETRACE_FILE: aliasEmitFile },
-  },
-);
-if (aliasEmit.status !== 0) {
-  console.error("FAIL tracked alias review.chair exit", aliasEmit.status, aliasEmit.stderr);
-  failed++;
-} else {
-  const rec = JSON.parse(fs.readFileSync(aliasEmitFile, "utf8").trim());
-  if (rec.dispositionsMissing !== true || "dispositions" in rec) {
-    console.error("FAIL tracked alias path must suppress chair emit", rec);
-    failed++;
-  } else {
-    console.log("ok - review.chair suppresses tracked verdicts reached via symlink alias");
-  }
-}
-fs.rmSync(aliasEmitRepo, { recursive: true, force: true });
-fs.rmSync(aliasEmitParent, { recursive: true, force: true });
-
 fs.rmSync(chairTmp, { recursive: true, force: true });
 
 if (failed) process.exit(1);

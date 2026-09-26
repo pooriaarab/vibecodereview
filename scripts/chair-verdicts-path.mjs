@@ -139,6 +139,28 @@ export function resolveWriteTarget(file, cwd = process.cwd()) {
 }
 
 /**
+ * @param {unknown} err
+ */
+function isEnoent(err) {
+  return err && typeof err === "object" && "code" in err && err.code === "ENOENT";
+}
+
+/**
+ * @param {string} probe
+ * @param {string} originalAbs
+ * @returns {string | null}
+ */
+function symlinkReasonAt(probe, originalAbs) {
+  if (!fs.lstatSync(probe).isSymbolicLink()) {
+    return null;
+  }
+  if (probe === originalAbs) {
+    return `symlink at chair verdicts path ${originalAbs}`;
+  }
+  return `symlink in chair verdicts path at ${probe}`;
+}
+
+/**
  * @param {string} abs absolute path
  * @returns {string | null}
  */
@@ -146,26 +168,22 @@ function scratchSymlinkUnsafeReason(abs) {
   const root = path.parse(abs).root;
   let probe = abs;
   while (true) {
+    let linkReason;
     try {
-      if (fs.lstatSync(probe).isSymbolicLink()) {
-        if (probe === abs) {
-          return `symlink at chair verdicts path ${abs}`;
-        }
-        return `symlink in chair verdicts path at ${probe}`;
-      }
+      linkReason = symlinkReasonAt(probe, abs);
     } catch (err) {
-      if (err && typeof err === "object" && "code" in err && err.code === "ENOENT") {
-        if (probe === abs) {
-          const parent = path.dirname(probe);
-          if (parent === probe || parent === root) {
-            return null;
-          }
-          probe = parent;
-          continue;
-        }
+      if (!isEnoent(err) || probe !== abs) {
         return `chair verdicts path could not be inspected (${abs})`;
       }
-      return `chair verdicts path could not be inspected (${abs})`;
+      const parent = path.dirname(probe);
+      if (parent === probe || parent === root) {
+        return null;
+      }
+      probe = parent;
+      continue;
+    }
+    if (linkReason) {
+      return linkReason;
     }
     if (probe === root) {
       return null;

@@ -53,5 +53,40 @@ if (spoofRun.status !== 0) {
 }
 fs.rmSync(spoofRepo, { recursive: true, force: true });
 
+const aliasRepo = fs.mkdtempSync(path.join(os.tmpdir(), "vcr-chair-spoof-alias-repo-"));
+const aliasParent = fs.mkdtempSync(path.join(os.tmpdir(), "vcr-chair-spoof-alias-parent-"));
+spawnSync("git", ["init", "-q"], { cwd: aliasRepo });
+spawnSync("git", ["config", "user.email", "spoof@example.com"], { cwd: aliasRepo });
+spawnSync("git", ["config", "user.name", "Spoof"], { cwd: aliasRepo });
+fs.writeFileSync(path.join(aliasRepo, "README.md"), "init\n");
+fs.writeFileSync(
+  path.join(aliasRepo, "chair-verdicts.json"),
+  JSON.stringify({ verdict: "approve", dispositions: [{ id: "f1", disposition: "confirmed-open" }] }),
+);
+spawnSync("git", ["add", "README.md", "chair-verdicts.json"], { cwd: aliasRepo });
+spawnSync("git", ["commit", "-q", "-m", "track"], { cwd: aliasRepo });
+fs.symlinkSync(aliasRepo, path.join(aliasParent, "repo-alias"));
+const aliasVerdicts = path.join(aliasParent, "repo-alias", "chair-verdicts.json");
+const aliasFile = path.join(aliasParent, "traces.jsonl");
+const aliasRun = run(
+  ["review.chair", "--verdicts", aliasVerdicts],
+  { VIBETRACE_FILE: aliasFile },
+  { cwd: aliasRepo },
+);
+if (aliasRun.status !== 0) {
+  console.error("FAIL tracked alias review.chair exit", aliasRun.status, aliasRun.stderr);
+  failed++;
+} else {
+  const rec = JSON.parse(fs.readFileSync(aliasFile, "utf8").trim());
+  if (rec.dispositionsMissing !== true || "dispositions" in rec) {
+    console.error("FAIL tracked alias path must suppress chair emit", rec);
+    failed++;
+  } else {
+    console.log("ok - review.chair suppresses tracked verdicts reached via symlink alias");
+  }
+}
+fs.rmSync(aliasRepo, { recursive: true, force: true });
+fs.rmSync(aliasParent, { recursive: true, force: true });
+
 if (failed) process.exit(1);
 console.log("vibetrace-emit-spoof tests passed");
