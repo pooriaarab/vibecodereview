@@ -422,7 +422,11 @@ runs:
         # sandbox; paths under .git/ are treated as sensitive and blocked too.
         # Use a visible filename (not a dotfile): Claude Code's sandbox treats
         # many dot-prefixed paths as sensitive and blocks Write/Bash (#194).
-        printf 'VCR_CHAIR_VERDICTS=%s\n' "$PWD/chair-verdicts.json" >> "$GITHUB_ENV"
+        VCR_CHAIR_VERDICTS="$PWD/chair-verdicts.json"
+        if ! node "${{ github.action_path }}/scripts/chair-verdicts-path.mjs" --assert "$VCR_CHAIR_VERDICTS"; then
+          exit 1
+        fi
+        printf 'VCR_CHAIR_VERDICTS=%s\n' "$VCR_CHAIR_VERDICTS" >> "$GITHUB_ENV"
         printf '%s\n' /council-carry.next.md >> "$(git rev-parse --git-dir)/info/exclude"
         printf '%s\n' /chair-verdicts.json >> "$(git rev-parse --git-dir)/info/exclude"
         # Classify here, before the CLI install and token probe, so a docs-only

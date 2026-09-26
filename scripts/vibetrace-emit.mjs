@@ -12,9 +12,10 @@
 // GITHUB_REPOSITORY, VCR_PR / GITHUB_PR_NUMBER, GITHUB_HEAD_REF,
 // VCR_ISSUE / OFFROUTER_ISSUE, VCR_PR_BODY
 
-import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { isGitTracked, resolveWriteTarget } from "./chair-verdicts-path.mjs";
+import { parseChairVerdictsJson } from "./chair-verdicts.mjs";
 import { buildChairRecord, buildCouncilRecord } from "./vibetrace-records.mjs";
 
 function arg(name, fallback = undefined) {
@@ -32,26 +33,26 @@ function readOptional(file) {
   }
 }
 
-// The chair writes verdicts to a checkout-root scratch path (git-ignored, not
-// committed). A pull request can also commit a file at that same path, and it
-// would be present at that path before the chair ever runs. A tracked file is
-// therefore never this run's own scratch write -- trust nothing there,
-// regardless of what a later legitimate write did to its bytes.
-function isGitTracked(file) {
-  try {
-    execFileSync("git", ["ls-files", "--error-unmatch", "--", file], { stdio: "ignore" });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 function readVerdicts(file) {
   if (!file) return { missing: true };
-  if (!fs.existsSync(file)) return { missing: true };
-  if (isGitTracked(file)) return { missing: true };
   try {
-    return { missing: false, content: fs.readFileSync(file, "utf8") };
+    fs.lstatSync(file);
+  } catch {
+    return { missing: true };
+  }
+  const cwd = process.cwd();
+  const targets = new Set([path.resolve(cwd, file)]);
+  try {
+    targets.add(resolveWriteTarget(file, cwd));
+  } catch {
+    return { missing: true };
+  }
+  for (const target of targets) {
+    if (isGitTracked(target, cwd)) return { missing: true };
+  }
+  try {
+    const readPath = resolveWriteTarget(file, cwd);
+    return { missing: false, content: fs.readFileSync(readPath, "utf8") };
   } catch {
     return { missing: true };
   }
@@ -131,12 +132,17 @@ function buildRecord(kind) {
         `vibetrace-emit: chair verdicts consumed from ${verdictsFile} (verdict=${built.record.verdict}, dispositions=${n})`,
       );
     } else if (built.ok && built.record.dispositionsMissing === true) {
-      // The file existed and was trusted, but the parsed content did not stand
-      // up on its own -- bad JSON, or disposition ids that don't match
-      // council-findings.md's meta block. Distinct from the "missing or
-      // untrusted" case above: here the chair did write, just not something usable.
-      const reason = built.record.dispositionsRejected ? `: ${built.record.dispositionsRejected}` : "";
-      console.error(`vibetrace-emit: chair verdicts at ${verdictsFile} parsed but unusable${reason}`);
+      // The file existed and was trusted, but the content did not stand up on
+      // its own. Distinct from the "missing or untrusted" case above.
+      const parsed = parseChairVerdictsJson(verdicts.content);
+      if (!parsed.ok) {
+        console.error(
+          `vibetrace-emit: chair verdicts at ${verdictsFile} present but unusable (failed to parse JSON)`,
+        );
+      } else {
+        const reason = built.record.dispositionsRejected ? `: ${built.record.dispositionsRejected}` : "";
+        console.error(`vibetrace-emit: chair verdicts at ${verdictsFile} present but unusable${reason}`);
+      }
     }
     return built;
   }

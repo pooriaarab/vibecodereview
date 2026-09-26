@@ -10,9 +10,15 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ACTION_YML="$ROOT/action.yml"
 
+ASSIGN_LINE="$(grep -m1 'VCR_CHAIR_VERDICTS="\$PWD/chair-verdicts.json"' "$ACTION_YML")"
+ASSERT_LINE="$(grep -m1 'chair-verdicts-path.mjs" --assert' "$ACTION_YML")"
 VERDICTS_LINE="$(grep -m1 "printf 'VCR_CHAIR_VERDICTS=" "$ACTION_YML")"
 EXCLUDE_LINE="$(grep -m1 '/chair-verdicts\.json.*info/exclude' "$ACTION_YML")"
 
+if [[ -z "$ASSIGN_LINE" || -z "$ASSERT_LINE" ]]; then
+  echo "FAIL could not find chair-verdicts path guard in action.yml" >&2
+  exit 1
+fi
 if [[ -z "$VERDICTS_LINE" ]]; then
   echo "FAIL could not find the VCR_CHAIR_VERDICTS printf line in action.yml" >&2
   exit 1
@@ -35,6 +41,13 @@ git commit -q -m init
 
 export PWD="$WORK"
 export GITHUB_ENV="$WORK/env.out"
+eval "$ASSIGN_LINE"
+if node "$ROOT/scripts/chair-verdicts-path.mjs" --assert "$VCR_CHAIR_VERDICTS"; then
+  : "guard passed"
+else
+  echo "FAIL chair-verdicts-path guard must pass for untracked scratch path" >&2
+  exit 1
+fi
 eval "$VERDICTS_LINE"
 eval "$EXCLUDE_LINE"
 
@@ -67,6 +80,14 @@ fi
 
 if git ls-files --error-unmatch -- "$VCR_CHAIR_VERDICTS" >/dev/null 2>&1; then
   echo "FAIL scratch verdict file must not be git-tracked" >&2
+  exit 1
+fi
+
+# Consumer PRs can track this path even when info/exclude hides it from status.
+git add -f chair-verdicts.json
+git commit -q -m "track verdicts"
+if node "$ROOT/scripts/chair-verdicts-path.mjs" --assert "$VCR_CHAIR_VERDICTS"; then
+  echo "FAIL chair-verdicts-path guard must fail when path is git-tracked" >&2
   exit 1
 fi
 
