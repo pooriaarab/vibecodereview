@@ -36,3 +36,6 @@ jobs:
       - name: chair-trivial
         if: ${{ !cancelled() }}
         run: bash scripts/chair-trivial.test.sh
+      - name: chair-verdicts-path
+        if: ${{ !cancelled() }}
+        run: bash scripts/chair-verdicts-path.test.sh
