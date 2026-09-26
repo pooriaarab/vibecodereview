@@ -17,13 +17,20 @@ export function defaultChairVerdictsPath(cwd = process.cwd()) {
 
 /**
  * @param {string} cwd
- * @returns {string | null} human reason when not a git checkout; null when ok
  */
-export function gitCheckoutUnsafeReason(cwd = process.cwd()) {
-  const r = spawnSync("git", ["rev-parse", "--show-toplevel"], {
+function runRevParseTopLevel(cwd) {
+  return spawnSync("git", ["rev-parse", "--show-toplevel"], {
     cwd,
     encoding: "utf8",
   });
+}
+
+/**
+ * @param {string} cwd
+ * @returns {string | null} human reason when not a git checkout; null when ok
+ */
+export function gitCheckoutUnsafeReason(cwd = process.cwd()) {
+  const r = runRevParseTopLevel(cwd);
   if (r.status !== 0) {
     const detail = (r.stderr || r.stdout || "").trim();
     return detail
@@ -42,17 +49,10 @@ export function gitCheckoutUnsafeReason(cwd = process.cwd()) {
  * @throws when cwd is not a git checkout
  */
 function gitRepositoryTopLevel(cwd = process.cwd()) {
-  const repoReason = gitCheckoutUnsafeReason(cwd);
-  if (repoReason) {
-    throw new Error(repoReason);
-  }
-  const r = spawnSync("git", ["rev-parse", "--show-toplevel"], {
-    cwd,
-    encoding: "utf8",
-  });
+  const r = runRevParseTopLevel(cwd);
   if (r.status !== 0 || !r.stdout?.trim()) {
     const detail = (r.stderr || r.stdout || "").trim();
-    throw new Error(detail || "git rev-parse --show-toplevel failed");
+    throw new Error(detail || "checkout is not a git repository");
   }
   return r.stdout.trim();
 }
