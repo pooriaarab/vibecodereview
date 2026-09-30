@@ -47,6 +47,9 @@ devin_seat() {
   fetch_cli https://cli.devin.ai/install.sh devin || return 1
   mkdir -p "$(dirname "$DEVIN_CREDS")"
   (umask 077; printf 'windsurf_api_key = "%s"\n' "$DEVIN_CLI_KEY" > "$DEVIN_CREDS")
+  # A credential the CLI rejects ends in "Login canceled" with nothing else.
+  # Say what the CLI saw first, so a wrong key reads differently from a bad run.
+  devin auth status 2>&1 | head -2
   env -u CURSOR_API_KEY -u DEVIN_CLI_KEY timeout "$SEAT_TIMEOUT" \
     devin -p --prompt-file "$PROMPT_FILE" --model "$DEVIN_MODEL" \
       --permission-mode dangerous --respect-workspace-trust false
