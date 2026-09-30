@@ -20,7 +20,7 @@ if command -v claude >/dev/null 2>&1 || [ -x "$HOME/.local/bin/claude" ]; then
   echo "Claude Code CLI already present; skipping install."
 else
   # Retry the download. Every later step -- the council fan-out, all three
-  # chair attempts, the OpenRouter fallback -- runs after this one, so a
+  # chair attempts, the CLI-seat fallback -- runs after this one, so a
   # single connection reset here loses the whole review and none of those
   # fallbacks gets a turn. --retry-all-errors is the flag that makes a reset
   # retryable: on its own --retry covers transient HTTP statuses and

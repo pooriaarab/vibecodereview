@@ -200,9 +200,20 @@ Or wire the action directly:
     gemini_api_key: ${{ secrets.GEMINI_API_KEY }}
     moonshot_api_key: ${{ secrets.MOONSHOT_API_KEY }}
     openrouter_api_key: ${{ secrets.OPENROUTER_API_KEY }}
+    devin_cli_key: ${{ secrets.DEVIN_CLI_KEY }}
+    cursor_api_key: ${{ secrets.CURSOR_API_KEY }}
     vibetrace_ingest_url: ${{ secrets.VIBETRACE_INGEST_URL }}
     vibetrace_ingest_token: ${{ secrets.VIBETRACE_INGEST_TOKEN }}
 ```
+
+When every Claude chair attempt fails, the chair falls back to CLI seats:
+Devin (`devin_cli_key`, SWE-2 Max), then Cursor (`cursor_api_key`). Each seat
+runs the same chair prompt, writes the same verdicts file, and posts with
+`gh`. A seat that exits without posting counts as failed. `devin_cli_key` is
+the `windsurf_api_key` value that `devin auth login` writes to
+`~/.local/share/devin/credentials.toml`. The Devin CLI does not read a key
+from the environment. Grok is not a seat: its CLI signs in with a short-lived
+OIDC session, so it cannot run unattended in Actions.
 
 Swap models without code: `council_models` input, or the `*_MODEL` env
 overrides (`OPENROUTER_MODEL=deepseek/deepseek-v4-flash`, etc.).
@@ -288,7 +299,7 @@ Choose the key over seats when **who pays, and who the diff reaches, is the
 point**. A seat bills a person; an API key bills the organisation that issued
 it. Pass the key and no other provider key, and Anthropic is the only vendor
 the diff reaches — every other member drops out on its own missing key, and
-the OpenRouter fallback chair is already gated on `openrouter_api_key`. With
+the CLI-seat fallback chair never runs on the key path. With
 the key, `claude` through `claude4` are slots on one account, differing only
 by model and lens. Choose seats when cost is the point: a seat bills a flat
 subscription you already pay for, and four of them rotate when one caps out.

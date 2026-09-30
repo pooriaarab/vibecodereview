@@ -86,7 +86,7 @@ chair_names = [
     "Chair review (backup token)",
     "Chair review (third token)",
     "Chair review (fourth token)",
-    "Chair fallback (OpenRouter)",
+    "Chair fallback (CLI seats)",
     "Clear stale chair-verdicts.json before backup attempt",
     "Clear stale chair-verdicts.json before third attempt",
     "Clear stale chair-verdicts.json before fourth attempt",

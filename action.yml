@@ -36,10 +36,14 @@ inputs:
   openrouter_api_key:
     description: "OpenRouter key — cheap leftover members (DeepSeek/GLM). Not Claude, Codex, or Grok. Omit to drop it."
     required: false
-  chair_fallback_model:
-    description: "Model for the OpenRouter fallback chair, used only when every Claude OAuth token fails. Must be a cheap leftover id (default deepseek/deepseek-v4-flash). Claude, Codex, and Grok ids are refused before the HTTP call. Omit openrouter_api_key to disable the fallback entirely."
+  devin_cli_key:
+    description: "Devin CLI key (the windsurf_api_key that `devin auth login` writes to credentials.toml). First CLI chair seat, used only when every Claude chair attempt fails. It runs the same chair prompt on SWE-2 Max. Omit to drop the seat."
     required: false
-    default: "deepseek/deepseek-v4-flash"
+    default: ""
+  cursor_api_key:
+    description: "Cursor API key for cursor-agent. Second CLI chair seat, used only when every Claude attempt and the Devin seat fail. Omit to drop the seat."
+    required: false
+    default: ""
   council_models:
     description: "Optional CSV override: provider|model|Name|lens,... (providers: openai, gemini, moonshot, openrouter, custom, claude, claude2, claude3, claude4). Claude seats shell the Claude Code CLI using the matching claude_code_oauth_token. OpenRouter must not name a Claude, Codex, or Grok model."
     required: false
@@ -738,8 +742,11 @@ runs:
         probe() {
           slot="$1"; token="$2"
           # An absent token is already handled by the `if:` on each attempt.
-          # Report it live so this step never becomes a second, divergent gate.
-          if [ -z "$token" ]; then echo "live" > "probe.$slot"; return; fi
+          # Report it as `absent`, never `live`: `live` for an empty input hid
+          # a caller that wired only two seats (pooriaarab/clis#131), and the
+          # log read as two healthy seats that were skipped for no reason.
+          # `absent` is not `dead`, so no attempt's `if:` changes.
+          if [ -z "$token" ]; then echo "absent" > "probe.$slot"; return; fi
           # A dead token makes the CLI exit non-zero AND print the dead
           # signature, so the exit code cannot gate the parse. Ignore it and
           # judge the JSON alone; anything unparseable falls through to live.
@@ -771,9 +778,13 @@ runs:
         wait
         for s in 1 2 3 4; do
           v="$(cat "probe.$s" 2>/dev/null || echo live)"
-          [ "$v" = "dead" ] || v="live"
+          case "$v" in dead|absent) ;; *) v="live" ;; esac
           echo "token_${s}=$v" >> "$GITHUB_OUTPUT"
           echo "chair token $s: $v"
+          if [ "$v" = "absent" ]; then
+            input=claude_code_oauth_token; [ "$s" = 1 ] || input="${input}_$s"
+            echo "  the caller's workflow does not pass $input, so this seat never runs"
+          fi
           [ "$v" = "dead" ] && cat "reason.$s" 2>/dev/null
           true
         done
@@ -910,7 +921,7 @@ runs:
     # Nothing else clears it, and the final emit step trusts whatever file is
     # on disk when it runs -- so without this, a stale verdict from a chair
     # that never posted gets misattributed to whichever later attempt (down
-    # to the no-Write OpenRouter fallback) actually posts the real review.
+    # to the CLI-seat fallback) actually posts the real review.
     # One cleanup precedes each attempt below, gated on the same condition
     # that already decides whether that attempt runs, so a still-running
     # earlier success (which skips every later attempt) is never touched.
@@ -983,12 +994,9 @@ runs:
         prompt: ${{ steps.prompt.outputs.text }}
         claude_args: '--allowed-tools "Bash(gh api:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr review:*),Bash(gh pr comment:*),Bash(git:*),Bash(jq:*),Bash(cat:*),Bash(ls:*),Bash(head:*),Bash(wc:*),Read,Glob,Grep,Edit,Write,TodoWrite"'
 
-    # This one matters most: the fallback has no Write tool (it is a single
-    # completion call, not an agentic loop), so it can never overwrite a
-    # stale file itself. Without this cleanup, a stale verdict left by a
-    # crashed full-tool attempt would ride along into the emit step and be
-    # reported as the verdict behind the fallback's own, differently-reasoned
-    # review.
+    # The CLI chair clears the verdicts file itself before each seat, so a
+    # stale verdict from a crashed Claude attempt never rides into the emit
+    # step. This cleanup covers the case where no CLI seat is wired at all.
     - name: Clear stale chair-verdicts.json before fallback
       if: >-
         steps.budget.outputs.over != 'true' &&
@@ -1003,20 +1011,19 @@ runs:
       shell: bash
       run: rm -f "$VCR_CHAIR_VERDICTS"
 
-    # Surface the true result: green if any chair run succeeded; red if they all
-    # failed. Without this, continue-on-error would mask a genuine failure as
-    # success. A chair that dies in ~0.5s at $0 cost with one turn is a dead
-    # token, not a bad review — check the subscription before the prompt.
-    # Last resort. Every Claude token has failed, so the choice is between a
-    # weaker review and none at all. On 2026-08-27 both subscriptions capped out
-    # at once and the whole fleet lost its review for days — a Claude-only chair
-    # makes one vendor's quota a single point of failure for every repo.
+    # Last resort. Every Claude token has failed, so the choice is between
+    # another vendor's review and none at all. On 2026-08-27 both
+    # subscriptions capped out at once and the whole fleet lost its review for
+    # days -- a Claude-only chair makes one vendor's quota a single point of
+    # failure for every repo. The chain is CLI seats (Devin, then Cursor), not
+    # one HTTP completion: they run the same prompt as the Claude chairs, so
+    # the proof lens, the verdicts file and the review shape are unchanged.
     #
     # That trade is for a caller on seats, who named no chair in particular.
     # A caller who set anthropic_api_key pinned the chair to one account on
     # purpose, so a rejected key must surface as a red check, not as a review
     # posted by another vendor's model. Hence the input gate below.
-    - name: Chair fallback (OpenRouter)
+    - name: Chair fallback (CLI seats)
       id: chair_fallback
       if: >-
         steps.budget.outputs.over != 'true' &&
@@ -1027,22 +1034,18 @@ runs:
         steps.chair_backup.outcome != 'success' &&
         steps.chair_third.outcome != 'success' &&
         steps.chair_fourth.outcome != 'success' &&
-        inputs.openrouter_api_key != ''
+        (inputs.devin_cli_key != '' || inputs.cursor_api_key != '')
       continue-on-error: true
       shell: bash
       env:
-        OPENROUTER_API_KEY: ${{ inputs.openrouter_api_key }}
+        VCR_PROMPT: ${{ steps.prompt.outputs.text }}
         GH_TOKEN: ${{ inputs.github_token }}
-        GITHUB_REPOSITORY: ${{ github.repository }}
-        PR_NUMBER: ${{ github.event.pull_request.number }}
-        CHAIR_FALLBACK_MODEL: ${{ inputs.chair_fallback_model }}
-        # The proof lens must reach every chair. Without these two the fallback
-        # reviewed without it, so a subscription outage turned proof off and the
-        # check still reported green.
-        PR_CONTEXT_FILE: ${{ runner.temp }}/pr-context.txt
-        VCR_REQUIRE_PROOF: ${{ inputs.require_proof }}
-        VCR_REVIEW_HEAD_SHA: ${{ env.VCR_REVIEW_HEAD_SHA }}
-      run: node "${{ github.action_path }}/scripts/chair-fallback.mjs" pr.diff council-findings.md
+        VCR_REPO: ${{ github.repository }}
+        VCR_PR: ${{ github.event.pull_request.number }}
+        VCR_STARTED_AT: ${{ steps.gate_start.outputs.at }}
+        DEVIN_CLI_KEY: ${{ inputs.devin_cli_key }}
+        CURSOR_API_KEY: ${{ inputs.cursor_api_key }}
+      run: bash "${{ github.action_path }}/scripts/cli-chair.sh"
 
     # A completed chair review no longer needs the per-member cache comments;
     # remove them after the final review is posted. A failed cleanup is
@@ -1185,7 +1188,7 @@ runs:
         # STARTED_AT satisfies the gate even when every chair failed to post.
         # "claude[bot]" covers the four Claude Code Action chairs (confirmed
         # by scripts/budget-guard.sh, which already counts reviews under that
-        # login for the same fleet). The OpenRouter fallback posts through
+        # login for the same fleet). The CLI-seat fallback posts through
         # `gh pr review` with `inputs.github_token`; on the default wiring
         # (`github_token: ${{ github.token }}`) GitHub attributes that to
         # "github-actions[bot]", but a consumer repo may instead pass a
