@@ -11,7 +11,7 @@
   },
   "scripts": {
     "test": "node --test scripts/*.test.mjs && npm run selfcheck",
-    "selfcheck": "node scripts/council-review.mjs --selfcheck",
+    "selfcheck": "node scripts/council-review.mjs --selfcheck && node scripts/chair-fallback.mjs --selfcheck",
     "mcp": "node mcp/server.mjs"
   },
   "files": [
