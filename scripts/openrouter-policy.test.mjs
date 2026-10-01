@@ -4,10 +4,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  DEFAULT_CHAIR_FALLBACK_MODEL,
   bannedOpenRouterReason,
   isClaudeSeatProvider,
-  resolveChairFallbackModel,
   usesOpenRouterRoute,
 } from "./openrouter-policy.mjs";
 import { openRouterFallbackFor, mutationMember, PROVIDERS } from "./council-config.mjs";
@@ -55,21 +53,6 @@ check("allows cheap leftover OpenRouter ids", () => {
   }
 });
 
-check("default chair fallback is allowed and matches action.yml", () => {
-  assert.equal(bannedOpenRouterReason(DEFAULT_CHAIR_FALLBACK_MODEL), null);
-  assert.equal(resolveChairFallbackModel("").model, DEFAULT_CHAIR_FALLBACK_MODEL);
-  const action = fs.readFileSync(path.join(root, "action.yml"), "utf8");
-  assert.match(action, new RegExp(`default: "${DEFAULT_CHAIR_FALLBACK_MODEL}"`));
-  assert.doesNotMatch(action, /default: "anthropic\/claude/);
-  assert.doesNotMatch(action, /default: "x-ai\/grok/);
-});
-
-check("an explicit Grok chair fallback is refused", () => {
-  const resolved = resolveChairFallbackModel("x-ai/grok-4.5");
-  assert.ok(resolved.error);
-  assert.match(resolved.error, /Grok/);
-});
-
 check("a dead native GPT key reroutes to cheap DeepSeek, not GPT", () => {
   const saved = process.env.OPENROUTER_API_KEY;
   process.env.OPENROUTER_API_KEY = "sk-test";
@@ -87,12 +70,6 @@ check("a dead native GPT key reroutes to cheap DeepSeek, not GPT", () => {
     if (saved === undefined) delete process.env.OPENROUTER_API_KEY;
     else process.env.OPENROUTER_API_KEY = saved;
   }
-});
-
-check("an explicit Claude chair fallback is refused", () => {
-  const resolved = resolveChairFallbackModel("anthropic/claude-sonnet-5");
-  assert.ok(resolved.error);
-  assert.match(resolved.error, /Claude/);
 });
 
 check("Claude OAuth seats never reroute to OpenRouter", () => {

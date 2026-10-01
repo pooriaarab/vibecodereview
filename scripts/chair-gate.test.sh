@@ -108,13 +108,13 @@ OVER_BUDGET=false P=failure B=failure T=success Q=skipped F=skipped REVIEWS_JSON
 OVER_BUDGET=false P=failure B=failure T=failure Q=success F=skipped REVIEWS_JSON="[$(claude_review)]" \
   check 0 'the fourth token posting passes'
 OVER_BUDGET=false P=failure B=failure T=failure Q=failure F=success REVIEWS_JSON="[$(fallback_review)]" \
-  check 0 'the OpenRouter fallback posting under github-actions[bot] passes'
+  check 0 'the CLI-seat fallback posting under github-actions[bot] passes'
 
 # A consumer repo may wire a `vibecodereview[bot]`-backed app token into
 # github_token instead of the default github.token, so the fallback's review
 # shows up under that login there rather than github-actions[bot].
 OVER_BUDGET=false P=failure B=failure T=failure Q=failure F=success REVIEWS_JSON="[$(vibecodereview_review)]" \
-  check 0 'the OpenRouter fallback posting under vibecodereview[bot] passes'
+  check 0 'the CLI-seat fallback posting under vibecodereview[bot] passes'
 
 OVER_BUDGET=false P=failure B=failure T=failure Q=failure F=failure REVIEWS_JSON='[]' \
   check 1 'every chair failing fails the gate'

@@ -202,7 +202,7 @@ check("a successful API-key chair is not undone by the later cleanups", () => {
   }
 });
 
-check("the OpenRouter fallback never runs on the API-key path", () => {
+check("the CLI-seat fallback never runs on the API-key path", () => {
   // A rejected key must read as a red check, not as a review posted by a
   // model from a vendor the caller pinned the chair away from.
   const at = action.indexOf("id: chair_fallback");

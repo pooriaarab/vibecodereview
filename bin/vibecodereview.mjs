@@ -10,7 +10,9 @@
 //
 // Provider keys (env or repo secrets): CLAUDE_CODE_OAUTH_TOKEN through _4
 //   (chair failover), OPENAI_API_KEY, GEMINI_API_KEY, MOONSHOT_API_KEY, and
-//   OPENROUTER_API_KEY (council members).
+//   OPENROUTER_API_KEY (council members), DEVIN_CLI_KEY, CURSOR_API_KEY and
+//   XAI_API_KEY
+//   (CLI chair seats, used only when every Claude seat fails).
 
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
@@ -21,6 +23,7 @@ import os from "node:os";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, "..");
 const PROVIDER_KEYS = ["OPENAI_API_KEY", "GEMINI_API_KEY", "MOONSHOT_API_KEY", "OPENROUTER_API_KEY"];
+const CLI_CHAIR_KEYS = ["DEVIN_CLI_KEY", "CURSOR_API_KEY", "XAI_API_KEY"];
 const REF = "pooriaarab/vibecodereview@v1"; // action ref repos pin to
 
 const WORKFLOW = `name: vibecodereview
@@ -52,6 +55,9 @@ jobs:
           gemini_api_key: \${{ secrets.GEMINI_API_KEY }}
           moonshot_api_key: \${{ secrets.MOONSHOT_API_KEY }}
           openrouter_api_key: \${{ secrets.OPENROUTER_API_KEY }}
+          devin_cli_key: \${{ secrets.DEVIN_CLI_KEY }}
+          cursor_api_key: \${{ secrets.CURSOR_API_KEY }}
+          xai_api_key: \${{ secrets.XAI_API_KEY }}
 `;
 
 function arg(name, def) {
@@ -79,6 +85,7 @@ function secrets() {
     console.log(`gh secret set CLAUDE_CODE_OAUTH_TOKEN_${slot} --repo ${repo}   # optional chair failover`);
   }
   for (const k of PROVIDER_KEYS) console.log(`gh secret set ${k} --repo ${repo}`);
+  for (const k of CLI_CHAIR_KEYS) console.log(`gh secret set ${k} --repo ${repo}   # optional CLI chair seat`);
 }
 
 function doctor() {
@@ -87,6 +94,9 @@ function doctor() {
   for (const slot of [2, 3, 4]) {
     const key = `CLAUDE_CODE_OAUTH_TOKEN_${slot}`;
     console.log(`  ${key.padEnd(24)} ${process.env[key] ? "set" : "not set (failover disabled)"}`);
+  }
+  for (const k of CLI_CHAIR_KEYS) {
+    console.log(`  ${k.padEnd(24)} ${process.env[k] ? "set" : "not set (CLI chair seat dropped)"}`);
   }
   console.log("Council members:");
   for (const k of PROVIDER_KEYS) console.log(`  ${k.padEnd(22)} ${process.env[k] ? "set" : "not set (member dropped)"}`);
