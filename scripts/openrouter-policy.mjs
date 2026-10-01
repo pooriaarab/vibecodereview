@@ -4,10 +4,6 @@
 // One paid Claude/Grok completion per PR across ~80 repos is how the
 // bill quietly doubled. This module is the hard stop.
 
-// Last-resort chair when every OAuth token is dead. Must stay a model
-// this policy allows — a Claude or Grok default here is the original leak.
-export const DEFAULT_CHAIR_FALLBACK_MODEL = "deepseek/deepseek-v4-flash";
-
 // Cheap OpenRouter ids used when a native key is dead. Never a metered
 // copy of Claude, Codex, or Grok.
 export const CHEAP_OPENROUTER_MODEL = "deepseek/deepseek-v4-flash";
@@ -63,14 +59,4 @@ export function usesOpenRouterRoute(model, provider) {
   if (model.provider !== "custom") return false;
   const url = String(provider?.url || process.env.CUSTOM_BASE_URL || "");
   return /openrouter\.ai/i.test(url);
-}
-
-/**
- * Model the fallback chair will call, or an error string if the configured
- * id is a banned family. An empty override keeps the default.
- */
-export function resolveChairFallbackModel(raw = process.env.CHAIR_FALLBACK_MODEL) {
-  const model = String(raw || "").trim() || DEFAULT_CHAIR_FALLBACK_MODEL;
-  const error = bannedOpenRouterReason(model);
-  return error ? { model, error } : { model };
 }
