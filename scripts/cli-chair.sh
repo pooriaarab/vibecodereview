@@ -22,13 +22,23 @@
 #      VCR_CHAIR_VERDICTS, DEVIN_CLI_KEY, CURSOR_API_KEY, XAI_API_KEY
 set -uo pipefail
 
-SEAT_TIMEOUT=900
+# One budget for the whole chain, install time included. The job timeout is
+# 30 minutes and the council and Claude attempts run first, so a fixed
+# per-seat timeout let two stalled seats use the job up before the third.
+# Each seat gets an equal share of what is left among the seats still to try.
+CHAIN_BUDGET=1200
+CHAIN_DEADLINE=$(( $(date +%s) + CHAIN_BUDGET ))
+SEAT_TIMEOUT=0
 DEVIN_MODEL=swe-2-max
 CURSOR_MODEL=cursor-grok-4.6-high-fast
 SEAT_KEYS=(DEVIN_CLI_KEY CURSOR_API_KEY XAI_API_KEY)
 PROMPT_FILE="$RUNNER_TEMP/cli-chair-prompt.txt"
 DEVIN_CREDS="$HOME/.local/share/devin/credentials.toml"
 export PATH="$HOME/.local/bin:$HOME/.grok/bin:$PATH"
+
+# The Devin credential must not outlive this script, even when the job is
+# cancelled mid-seat.
+trap 'rm -f "$DEVIN_CREDS"' EXIT
 
 # Run a seat's CLI with every seat key unset except the one it owns. Devin
 # owns none: it reads its credentials file, never the environment.
@@ -88,9 +98,16 @@ if [ ${#VCR_PROMPT} -lt 200 ]; then
   echo "::error::cli chair: the chair prompt is empty; refusing to run a seat with nothing to do"
   exit 1
 fi
-printf '%s\n' "$VCR_PROMPT" > "$PROMPT_FILE"
+# Repos that keep "Allow GitHub Actions to create and approve pull requests"
+# off (pooriaarab/clis does) reject `gh pr review --approve` from the
+# workflow token. A clean review would then count as no review and every seat
+# would fail on the same wall.
+{
+  printf '%s\n' "$VCR_PROMPT"
+  printf '\nIf `gh pr review --approve` is rejected, post the same body with `gh pr review --comment`.\n'
+} > "$PROMPT_FILE"
 
-tried=""
+seats=()
 for seat in devin cursor grok; do
   case "$seat" in
     devin)  key="${DEVIN_CLI_KEY:-}" ;;
@@ -99,13 +116,25 @@ for seat in devin cursor grok; do
   esac
   if [ -z "$key" ]; then
     echo "cli chair: $seat skipped (no credential passed)"
+  else
+    seats+=("$seat")
+  fi
+done
+
+tried=""
+left=${#seats[@]}
+for seat in "${seats[@]}"; do
+  SEAT_TIMEOUT=$(( (CHAIN_DEADLINE - $(date +%s)) / left ))
+  left=$(( left - 1 ))
+  if [ "$SEAT_TIMEOUT" -lt 60 ]; then
+    echo "cli chair: $seat skipped (chain budget spent)"
     continue
   fi
   tried="$tried $seat"
   # A seat that died mid-run can leave a verdicts file behind; the next seat
   # must not inherit it.
   rm -f "$VCR_CHAIR_VERDICTS"
-  echo "::group::cli chair: $seat"
+  echo "::group::cli chair: $seat (${SEAT_TIMEOUT}s)"
   case "$seat" in
     devin)  devin_seat ;;
     cursor) cursor_seat ;;
