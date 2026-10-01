@@ -22,7 +22,7 @@
  *   CLAUDE_CODE_OAUTH_TOKEN_3 CLAUDE_CODE_OAUTH_TOKEN_4
  *   OPENAI_API_KEY GEMINI_API_KEY
  *   MOONSHOT_API_KEY OPENROUTER_API_KEY
- *   DEVIN_CLI_KEY CURSOR_API_KEY
+ *   DEVIN_CLI_KEY CURSOR_API_KEY XAI_API_KEY
  *
  * Requires Node >= 20 and an authenticated `gh` CLI. Zero dependencies.
  * Idempotent: re-running re-sets secrets, reuses the branch and PR, and skips
@@ -47,6 +47,7 @@ const SECRET_NAMES = [
   // repo with no chair at all.
   'DEVIN_CLI_KEY',
   'CURSOR_API_KEY',
+  'XAI_API_KEY',
   'VIBETRACE_INGEST_URL',
   'VIBETRACE_INGEST_TOKEN',
 ];
@@ -101,6 +102,7 @@ const WORKFLOW_YAML =
     '          openrouter_api_key: ${{ secrets.OPENROUTER_API_KEY }}',
     '          devin_cli_key: ${{ secrets.DEVIN_CLI_KEY }}',
     '          cursor_api_key: ${{ secrets.CURSOR_API_KEY }}',
+    '          xai_api_key: ${{ secrets.XAI_API_KEY }}',
     '          vibetrace_ingest_url: ${{ secrets.VIBETRACE_INGEST_URL }}',
     '          vibetrace_ingest_token: ${{ secrets.VIBETRACE_INGEST_TOKEN }}',
   ].join('\n') + '\n';

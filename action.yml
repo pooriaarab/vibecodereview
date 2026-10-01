@@ -44,6 +44,10 @@ inputs:
     description: "Cursor API key for cursor-agent. Second CLI chair seat, used only when every Claude attempt and the Devin seat fail. Omit to drop the seat."
     required: false
     default: ""
+  xai_api_key:
+    description: "xAI API key for the Grok CLI. Third CLI chair seat, used only when every Claude attempt, Devin, and Cursor fail. A SuperGrok login cannot run unattended; only an API key works here. Omit to drop the seat."
+    required: false
+    default: ""
   council_models:
     description: "Optional CSV override: provider|model|Name|lens,... (providers: openai, gemini, moonshot, openrouter, custom, claude, claude2, claude3, claude4). Claude seats shell the Claude Code CLI using the matching claude_code_oauth_token. OpenRouter must not name a Claude, Codex, or Grok model."
     required: false
@@ -1015,7 +1019,7 @@ runs:
     # another vendor's review and none at all. On 2026-08-27 both
     # subscriptions capped out at once and the whole fleet lost its review for
     # days -- a Claude-only chair makes one vendor's quota a single point of
-    # failure for every repo. The chain is CLI seats (Devin, then Cursor), not
+    # failure for every repo. The chain is CLI seats (Devin, Cursor, Grok), not
     # one HTTP completion: they run the same prompt as the Claude chairs, so
     # the proof lens, the verdicts file and the review shape are unchanged.
     #
@@ -1034,7 +1038,7 @@ runs:
         steps.chair_backup.outcome != 'success' &&
         steps.chair_third.outcome != 'success' &&
         steps.chair_fourth.outcome != 'success' &&
-        (inputs.devin_cli_key != '' || inputs.cursor_api_key != '')
+        (inputs.devin_cli_key != '' || inputs.cursor_api_key != '' || inputs.xai_api_key != '')
       continue-on-error: true
       shell: bash
       env:
@@ -1045,6 +1049,7 @@ runs:
         VCR_STARTED_AT: ${{ steps.gate_start.outputs.at }}
         DEVIN_CLI_KEY: ${{ inputs.devin_cli_key }}
         CURSOR_API_KEY: ${{ inputs.cursor_api_key }}
+        XAI_API_KEY: ${{ inputs.xai_api_key }}
       run: bash "${{ github.action_path }}/scripts/cli-chair.sh"
 
     # A completed chair review no longer needs the per-member cache comments;

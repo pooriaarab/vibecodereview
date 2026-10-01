@@ -10,7 +10,8 @@
 //
 // Provider keys (env or repo secrets): CLAUDE_CODE_OAUTH_TOKEN through _4
 //   (chair failover), OPENAI_API_KEY, GEMINI_API_KEY, MOONSHOT_API_KEY, and
-//   OPENROUTER_API_KEY (council members), DEVIN_CLI_KEY and CURSOR_API_KEY
+//   OPENROUTER_API_KEY (council members), DEVIN_CLI_KEY, CURSOR_API_KEY and
+//   XAI_API_KEY
 //   (CLI chair seats, used only when every Claude seat fails).
 
 import { execFileSync } from "node:child_process";
@@ -22,7 +23,7 @@ import os from "node:os";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, "..");
 const PROVIDER_KEYS = ["OPENAI_API_KEY", "GEMINI_API_KEY", "MOONSHOT_API_KEY", "OPENROUTER_API_KEY"];
-const CLI_CHAIR_KEYS = ["DEVIN_CLI_KEY", "CURSOR_API_KEY"];
+const CLI_CHAIR_KEYS = ["DEVIN_CLI_KEY", "CURSOR_API_KEY", "XAI_API_KEY"];
 const REF = "pooriaarab/vibecodereview@v1"; // action ref repos pin to
 
 const WORKFLOW = `name: vibecodereview
@@ -56,6 +57,7 @@ jobs:
           openrouter_api_key: \${{ secrets.OPENROUTER_API_KEY }}
           devin_cli_key: \${{ secrets.DEVIN_CLI_KEY }}
           cursor_api_key: \${{ secrets.CURSOR_API_KEY }}
+          xai_api_key: \${{ secrets.XAI_API_KEY }}
 `;
 
 function arg(name, def) {
