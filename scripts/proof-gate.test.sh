@@ -81,7 +81,8 @@ PY
 fallback_step | grep -qF 'VCR_PROMPT: ${{ steps.prompt.outputs.text }}' \
   && report 0 'fallback chair receives the chair prompt that carries the proof bullet' \
   || report 1 'fallback chair receives the chair prompt that carries the proof bullet'
-grep -qF 'printf '"'"'%s\n'"'"' "$VCR_PROMPT" > "$PROMPT_FILE"' "$ROOT/scripts/cli-chair.sh" \
+grep -qF 'printf '"'"'%s\n'"'"' "$VCR_PROMPT"' "$ROOT/scripts/cli-chair.sh" \
+  && grep -qF '} > "$PROMPT_FILE"' "$ROOT/scripts/cli-chair.sh" \
   && report 0 'cli chair hands every seat that prompt' \
   || report 1 'cli chair hands every seat that prompt'
 
