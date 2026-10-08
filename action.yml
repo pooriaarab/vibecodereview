@@ -79,6 +79,10 @@ inputs:
     description: "Per-member deadline for the council fan-out. Members run in parallel, so this is the council's worst-case wall time. Omit for the 90s default."
     required: false
     default: ""
+  review_prose:
+    description: "Set to `true` to review .md, .mdx, .txt, and .rst changes with the full council. Default false keeps prose-only changes trivial. Lockfiles, images, fonts, media, LICENSE, NOTICE, CHANGELOG, and editor noise stay inert. Only the exact value `true` enables this input."
+    required: false
+    default: "false"
   mutation_lens:
     description: "Set to `true` to add a sixth member that asks whether the tests in the diff can fail at all: for each test added or changed it names one concrete mutation to the code under it that the test must catch. Off by default. It is dropped automatically on a diff that adds no test lines, and the report says so. It proposes mutations and does not run them — treat a finding as a claim to check, not a measured result."
     required: false
@@ -337,6 +341,7 @@ runs:
         LENS_PATH_FILTER: ${{ inputs.lens_path_filter }}
         PR_CONTEXT_FILE: ${{ runner.temp }}/pr-context.txt
         REQUIRE_PROOF: ${{ inputs.require_proof }}
+        VCR_REVIEW_PROSE: ${{ inputs.review_prose }}
       run: |
         # The council's scratch files live in the workspace, because the chair
         # prompt tells it to `cat pr.diff` and read `council-findings.md`. But
@@ -1121,6 +1126,7 @@ runs:
       continue-on-error: true
       shell: bash
       env:
+        VCR_REVIEW_PROSE: ${{ inputs.review_prose }}
         GH_TOKEN: ${{ inputs.github_token }}
         GITHUB_REPOSITORY: ${{ github.repository }}
         PR_NUMBER: ${{ github.event.pull_request.number }}

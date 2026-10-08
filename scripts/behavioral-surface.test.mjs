@@ -1,9 +1,15 @@
 #!/usr/bin/env node
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { test } from "node:test";
 import assert from "node:assert/strict";
 import { behavioralSurface } from "./behavioral-surface.mjs";
 
-function diffFor(path) {
-  return `diff --git a/${path} b/${path}\n--- a/${path}\n+++ b/${path}\n+change\n`;
+function diffFor(file) {
+  return `diff --git a/${file} b/${file}\n--- a/${file}\n+++ b/${file}\n+change\n`;
 }
 
 function joinDiffs(...paths) {
@@ -41,3 +47,44 @@ assert.equal(behavioralSurface(diffFor("config.json")).trivial, false);
 assert.equal(behavioralSurface(diffFor("package-lock.json")).trivial, true);
 
 console.log("behavioral surface tests passed");
+
+for (const file of ["VISION.md", "docs/decisions/x.md", "README.md", "guide.mdx", "guide.txt", "guide.rst"]) {
+  test(`review_prose opts in ${file}`, () => {
+    const diff = diffFor(file);
+    assert.equal(behavioralSurface(diff).trivial, true);
+    for (const review_prose of ["false", "TRUE", "1", "yes", "", true]) {
+      assert.deepEqual(behavioralSurface(diff, { review_prose }), behavioralSurface(diff));
+    }
+    assert.equal(behavioralSurface(diff, { review_prose: "true" }).trivial, false);
+  });
+}
+for (const file of ["bun.lock", "image.png", "font.woff2", "clip.mp4", "LICENSE", "LICENSE.md", "NOTICE", "NOTICE.txt", "CHANGELOG", "CHANGELOG.md", ".editorconfig"]) {
+  test(`review_prose keeps ${file} inert`, () => {
+    assert.deepEqual(behavioralSurface(diffFor(file), { review_prose: "true" }), behavioralSurface(diffFor(file)));
+  });
+}
+test("review_prose keeps mixed diffs unchanged", () => {
+  const diff = joinDiffs("README.md", "src/app.ts");
+  for (const review_prose of ["true", "false", "TRUE", "1", "yes", ""]) {
+    assert.equal(behavioralSurface(diff, { review_prose }).trivial, false);
+  }
+});
+
+test("review_prose reaches every council lens for a prose-only delta", () => {
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), "vcr-prose-"));
+  try {
+    const diff = path.join(work, "pr.diff");
+    const report = path.join(work, "findings.md");
+    fs.writeFileSync(diff, diffFor("VISION.md"));
+    const engine = fileURLToPath(new URL("./council-review.mjs", import.meta.url));
+    const result = spawnSync(process.execPath, [engine, diff, report], {
+      cwd: work, encoding: "utf8", env: { VCR_REVIEW_PROSE: "true" },
+    });
+    assert.equal(result.status, 0, result.stderr);
+    const text = fs.readFileSync(report, "utf8");
+    assert.match(text, /no provider keys set \(OPENAI_API_KEY, GEMINI_API_KEY, MOONSHOT_API_KEY, OPENROUTER_API_KEY, OPENROUTER_API_KEY\)/);
+    assert.doesNotMatch(text, /trivial delta|Lenses not dispatched/);
+  } finally {
+    fs.rmSync(work, { recursive: true, force: true });
+  }
+});

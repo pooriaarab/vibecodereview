@@ -14,6 +14,8 @@ export const LOCKFILES = new Set([
   "composer.lock", "go.sum", "Pipfile.lock", "uv.lock", "flake.lock",
 ]);
 
+const PROSE_EXTENSIONS = new Set([".md", ".mdx", ".txt", ".rst"]);
+
 export const INERT_EXTENSIONS = new Set([
   ".md", ".mdx", ".txt", ".rst",
   ".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".ico",
@@ -56,19 +58,22 @@ export function isProseMediaPath(path) {
   return INERT_EXTENSIONS.has(extensionOf(path));
 }
 
-function isInertPath(path) {
+function isInertPath(path, reviewProse) {
   if (isAgentInstructionPath(path)) return false;
   if (LOCKFILES.has(basename(path))) return true;
+  if (reviewProse && PROSE_EXTENSIONS.has(extensionOf(path))) {
+    return /^(LICENSE|NOTICE|CHANGELOG)(?:\.[^.]+)?$/.test(basename(path));
+  }
   return isProseMediaPath(path);
 }
 
 /** @returns {{ trivial: boolean, paths: string[], reason: string }} */
-export function behavioralSurface(diff) {
+export function behavioralSurface(diff, { review_prose = "false" } = {}) {
   const paths = diffPaths(diff);
   if (paths.length === 0) {
     return { trivial: false, paths, reason: "no parseable paths in diff" };
   }
-  const behavioral = paths.filter((p) => !isInertPath(p));
+  const behavioral = paths.filter((p) => !isInertPath(p, review_prose === "true"));
   if (behavioral.length > 0) {
     return {
       trivial: false,

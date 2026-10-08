@@ -59,6 +59,16 @@ assert.equal(classifyCli(src).stdout, "false");
 assert.equal(classifyCli(path.join(work, "missing.diff")).stdout, "false");
 assert.equal(classifyCli(docs).status, 0);
 
+for (const file of ["VISION.md", "docs/decisions/x.md", "README.md", "bun.lock", "image.png", "LICENSE"]) {
+  fs.writeFileSync(docs, diffFor(file));
+  for (const value of ["false", "TRUE", "1", "yes", "", "true"]) {
+    const result = classifyCli(docs, { env: { VCR_REVIEW_PROSE: value } });
+    const want = value === "true" && file.endsWith(".md") ? "false" : "true";
+    assert.equal(result.stdout, want, `--classify ${file} review_prose=${value}`);
+    assert.equal(result.status, 0, result.stderr);
+  }
+}
+
 const bin = path.join(work, "bin");
 fs.mkdirSync(bin);
 const log = path.join(work, "gh.log");

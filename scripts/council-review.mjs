@@ -279,7 +279,7 @@ async function main() {
     contextTruncated,
   };
 
-  const surface = behavioralSurface(memberDiffRaw);
+  const surface = behavioralSurface(memberDiffRaw, { review_prose: process.env.VCR_REVIEW_PROSE });
   if (surface.trivial) {
     const listed = surface.paths.map((p) => `\`${p}\``).join(", ");
     write(buildFindingsMarkdown([], baseReportOptions) + `\n\n_Council skipped: trivial delta with no behavioral surface — ${surface.reason}. Paths: ${listed}._\n`);
@@ -312,9 +312,11 @@ async function main() {
     mutationSkipped = "the member delta was truncated before its added test lines";
   }
   if (mutationSkipped) console.log(`Mutation lens enabled but not dispatched: ${mutationSkipped}`);
-  const kindRouting = filterMembersByKindRouting(members, memberDiffRaw);
+  // Only newly opted-in prose deltas bypass roster reductions; mixed diffs keep their routing.
+  const proseOnly = process.env.VCR_REVIEW_PROSE === "true" && behavioralSurface(memberDiffRaw).trivial;
+  const kindRouting = filterMembersByKindRouting(members, memberDiffRaw, proseOnly ? { routingEnabled: false } : {});
   members = kindRouting.members;
-  const weighted = filterMembersByWeight(members, memberDiffRaw);
+  const weighted = filterMembersByWeight(members, memberDiffRaw, proseOnly ? { enabled: false } : {});
   members = weighted.members;
   skippedLenses.push(...kindRouting.skippedLenses, ...weighted.skippedLenses);
   skippedLenses = [...new Set(skippedLenses)];
