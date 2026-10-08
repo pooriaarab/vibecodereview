@@ -19,11 +19,13 @@ action = yaml.safe_load(open(sys.argv[1]))
 steps = action["runs"]["steps"]
 by_name = {s.get("name"): s for s in steps}
 open(sys.argv[2], "w").write(json.dumps({
+  "inputs": action["inputs"],
   "names": [s.get("name") for s in steps],
   "steps": [
     {
       "name": s.get("name"),
       "id": s.get("id"),
+      "env": s.get("env", {}),
       "if": s.get("if") or "",
       "run": s.get("run") or "",
       "uses": s.get("uses") or "",
@@ -63,6 +65,11 @@ ok(start.get("id") == "council_start", "council start step id is council_start")
 ok("trivial=$TRIVIAL" in start.get("run", ""), "council start writes a trivial output")
 ok("trivial-chair.mjs" in start.get("run", "") and "--classify" in start.get("run", ""),
    "council start classifies with trivial-chair.mjs --classify")
+
+ok(meta["inputs"].get("review_prose", {}).get("default") == "false", "review_prose defaults to false")
+for name in ["Council fan-out (start)", "Trivial delta review"]:
+    ok(steps.get(name, {}).get("env", {}).get("VCR_REVIEW_PROSE") == "${{ inputs.review_prose }}",
+       f"{name} receives review_prose")
 
 trivial = steps.get("Trivial delta review", {})
 ok(bool(trivial), "action.yml has Trivial delta review")

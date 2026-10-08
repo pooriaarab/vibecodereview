@@ -83,7 +83,10 @@ drops what it cannot confirm, fixes what it can, pushes that commit to the
 branch, and posts one review.
 
 A trivial delta, such as a lockfile or docs-only push, skips the council
-entirely before any lens is dispatched.
+entirely before any lens is dispatched. Set the action input `review_prose: "true"`
+to review `.md`, `.mdx`, `.txt`, and `.rst` changes with the full council.
+The default is `"false"`; only the exact value `"true"` enables prose review.
+Lockfiles, images, fonts, media, LICENSE, NOTICE, CHANGELOG, and editor noise stay inert.
 
 ### The council
 
@@ -114,7 +117,7 @@ size, line count, or file count. Each lens reviews only the kinds it can speak t
 | maintainability | source, test, CI, agent instructions |
 | performance | source, style (CSS/SCSS/Less/Sass) |
 
-A lockfile-only or docs-only push never reaches routing at all: the trivial-delta check
+With `review_prose` off, a lockfile-only or docs-only push never reaches routing: the trivial-delta check
 above already skips the whole council, scope included, before any lens is dispatched.
 Routing only decides the roster once a delta has at least one non-inert path — a
 dependency-manifest-only push (`package.json`, `go.mod`, ...) keeps scope, correctness,

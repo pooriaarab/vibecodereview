@@ -8,17 +8,17 @@ import { execFileSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { behavioralSurface } from "./behavioral-surface.mjs";
 
-export function classifyDiff(raw) {
+export function classifyDiff(raw, options) {
   try {
-    return behavioralSurface(String(raw ?? "")).trivial === true;
+    return behavioralSurface(String(raw ?? ""), options).trivial === true;
   } catch {
     return false;
   }
 }
 
-export function classifyFile(file) {
+export function classifyFile(file, options) {
   try {
-    return classifyDiff(fs.readFileSync(file, "utf8"));
+    return classifyDiff(fs.readFileSync(file, "utf8"), options);
   } catch {
     return false;
   }
@@ -54,7 +54,7 @@ export function reviewArgs(pr, repo, bodyFile) {
 function surfaceFromWorkspace() {
   try {
     if (!fs.existsSync("pr-delta.diff")) return { paths: [] };
-    return behavioralSurface(fs.readFileSync("pr-delta.diff", "utf8"));
+    return behavioralSurface(fs.readFileSync("pr-delta.diff", "utf8"), { review_prose: process.env.VCR_REVIEW_PROSE });
   } catch {
     return { paths: [] };
   }
@@ -77,7 +77,7 @@ function postMain() {
 
 function main() {
   if (process.argv[2] === "--classify") {
-    process.stdout.write(classifyFile(process.argv[3]) ? "true" : "false");
+    process.stdout.write(classifyFile(process.argv[3], { review_prose: process.env.VCR_REVIEW_PROSE }) ? "true" : "false");
     return;
   }
   postMain();
