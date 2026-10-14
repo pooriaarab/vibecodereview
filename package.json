@@ -4,7 +4,7 @@
   "publishConfig": {
     "access": "public"
   },
-  "description": "LLM-council PR review: many models, diverse lenses, one self-healing GitHub check. Also reviews your local diff before you push.",
+  "description": "Multi-model pull request review with a GitHub Action, local CLI, MCP tool, provider routing, and optional chair fix commits.",
   "type": "module",
   "bin": {
     "vibecodereview": "bin/vibecodereview.mjs"
@@ -29,5 +29,6 @@
     "type": "git",
     "url": "git+https://github.com/pooriaarab/vibecodereview.git"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "keywords": ["code-review", "pull-request", "GitHub Actions", "mcp", "cli", "OpenAI", "Google Gemini", "Moonshot AI", "OpenRouter", "Claude Code", "Devin", "Cursor", "Grok", "multi-model", "review-automation"]
 }

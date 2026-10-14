@@ -1,193 +1,155 @@
-<p align="center">
-  <img src="assets/logo.jpg" width="128" alt="A clay ninja in a judge's robe">
-</p>
+# vibecodereview
 
-<p align="center">A council of AI models reviews your pull request, verifies every finding against the code, and pushes the fix.</p>
+[![npm version](https://img.shields.io/npm/v/vibecodereview)](https://www.npmjs.com/package/vibecodereview) [![Downloads/month](https://img.shields.io/npm/dm/vibecodereview)](https://www.npmjs.com/package/vibecodereview) [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](https://opensource.org/license/mit)
 
-<p align="center">
-  <a href="https://www.npmjs.com/package/vibecodereview"><img src="https://img.shields.io/npm/v/vibecodereview" alt="npm version"></a>
-  <a href="https://github.com/pooriaarab/vibecodereview/actions"><img src="https://github.com/pooriaarab/vibecodereview/actions/workflows/vibecodereview.yml/badge.svg" alt="vibecodereview check"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="License MIT"></a>
-</p>
+[Package](https://www.npmjs.com/package/vibecodereview) · [Setup](#send-your-first-review) · [Commands](#runtime-surfaces) · [Compare](#compare) · [Trailer](https://getvibe.dev/vibecodereview)
 
-```
-Major — fixed. repo-standards/SKILL.md baked in a time-sensitive fleet count
-  [...] Reworded to "most public repos in this fleet had none" in 4976ff0.
-
-Major — open, not fixed. The PR body's "How I verified" section is stale [...]
-  This is the author's evidence to regenerate [...] so I'm flagging it rather
-  than rewriting the PR body myself.
-```
-
-<p align="center"><em>Two findings from one real review, on
-<a href="https://github.com/pooriaarab/skills/pull/434">pooriaarab/skills#434</a>.
-It fixed the first and pushed the commit. It declined to fix the second, because
-rewriting an author's own evidence would defeat the point of asking for it.</em></p>
-
-## Contents
-
-[Install](#install) · [Quick start](#quick-start) · [Why](#why) · [The council](#the-council) · [Costs](#what-a-fix-cycle-costs) · [Local diff](#review-a-local-diff-before-you-push) · [License](#license)
+vibecodereview is an open-source pull-request review tool for maintainers. A large language model (LLM) council reviews diffs through separate lenses. Its GitHub Action adds a chair that checks findings, can push fixes, and posts a review.
 
 ## Install
+
+```bash
+npm install -g vibecodereview
+```
+
+Node.js 20 or newer is required. The npm package has zero runtime dependencies. Local review requires Git; remote pull-request commands require authenticated `gh`.
+
+## Send your first review
+
+Export keys in your shell. The CLI does not load `.env` files automatically. Use a personal repository whose diff you are allowed to send to the configured providers.
+
+```bash
+export OPENROUTER_API_KEY='your-key'
+vibecodereview doctor
+vibecodereview review --base origin/main
+```
+
+Run this on a branch with a nonempty source diff against `origin/main`. Success prints council findings with member results. Check for `SKIP/ERR` or skipped-council notes before treating it as reviewed. `doctor` checks whether variables exist; it does not authenticate them.
+
+## How it works
+
+```text
+Diff + optional PR claim -> routing and review weight -> applicable council members
+                                                       |
+                                  Markdown claims <----+
+                                        |
+GitHub Action only -> chair verifies -> optional fix commit -> one posted review
+```
+
+The Action's result gate and budget guards can fail even though the council script exits successfully.
+
+## Why it exists
+
+Maintainers can review one diff through distinct correctness, security, and other lenses with their own provider configuration. CodeRabbit and Devin Review also provide AI-assisted code review. vibecodereview exposes its council engine through a local CLI, a GitHub Action, and Model Context Protocol (MCP).
+
+## Compare
+
+Scope checked on 2026-10-14 against [CodeRabbit documentation](https://docs.coderabbit.ai/) and [Devin Review documentation](https://docs.devin.ai/work-with-devin/devin-review).
+
+| Scope | vibecodereview | CodeRabbit | Devin Review |
+|---|---|---|---|
+| Review setup | Action inputs and environment | Product configuration | Product configuration |
+| Review surface | Action, local CLI, stdio MCP | Pull requests, CLI, IDE | Pull-request review interface |
+| Provider selection here | Explicit council roster | Consult product documentation | Consult product documentation |
+
+## Coverage
+
+| Integration | Status | Credential or configuration |
+|---|---|---|
+| OpenAI | implemented HTTP adapter | `OPENAI_API_KEY` |
+| Google Gemini | implemented HTTP adapter | `GEMINI_API_KEY` |
+| Moonshot AI / Kimi | implemented HTTP adapter | `MOONSHOT_API_KEY` |
+| OpenRouter / DeepSeek / GLM | implemented HTTP adapter | `OPENROUTER_API_KEY` |
+| Custom OpenAI-compatible endpoint | implemented HTTP adapter | `CUSTOM_BASE_URL`, `CUSTOM_API_KEY` |
+| Anthropic Claude Code | implemented CLI seats | `CLAUDE_CODE_OAUTH_TOKEN` through `_4`, or explicit Anthropic key |
+| GitHub | implemented Action and CLI operations | Workflow `github_token` or authenticated `gh` |
+| Devin CLI | implemented chair fallback | `devin_cli_key` |
+| Cursor CLI | implemented chair fallback | `cursor_api_key` |
+| xAI Grok CLI | implemented chair fallback | `xai_api_key` |
+| Vibetrace | optional trace delivery | `vibetrace_ingest_url`, optional token |
+
+The provider registry defines nine built-in keys: five HTTP providers and `claude`, `claude2`, `claude3`, `claude4`. Additional numbered Claude tokens create more provider keys dynamically. Five default council members cover correctness, performance, security, maintainability, and scope. Mutation is a sixth, optional lens. Source and offline tests verify implementation paths. No live provider credentials were checked for this rewrite.
+
+## Common use cases
+
+1. GitHub maintainers: run council review and chair verification on owner-authored pull requests.
+2. Node.js developers: inspect a local Git diff before pushing.
+3. Agent builders: request `council_review` from a Claude Code MCP client.
+4. Test authors: enable Claude's mutation lens to propose changes that tests should catch.
+5. Multi-repository maintainers: use `review-prs` and authenticated `gh` to inspect open pull requests.
+
+## Features
+
+Features include [lens routing](#lens-routing), [chair verification](#github-action-setup), [budget controls](#delivery-and-behavior-limits), provider fallback, mutation proposals, and optional Vibetrace records.
+
+## Runtime surfaces
+
+`init [--dir .]` writes the workflow and overwrites an existing file. `review [--base <ref>]` prints findings for a tracked diff. `review-prs [--post] [--repo owner/repo]` reviews open PRs and optionally posts comments. `doctor` reports credential presence. `secrets [--repo owner/repo]` prints secret-setting commands without executing them.
+
+The npm package exposes one CLI bin and one MCP tool: `council_review(diff)`. Run the MCP server with `npm run mcp` from its installation directory or `node /path/to/vibecodereview/mcp/server.mjs`.
+
+## Delivery and behavior limits
+
+- Diffs reach configured third-party model providers. Follow this repository's personal/private-code restriction; do not send employer code through personal provider accounts.
+- The explicit `anthropic_api_key` input supports an organization-owned Anthropic account. Pass no other provider keys to keep model delivery on that account.
+- Council findings are claims. A zero exit code from the council engine does not prove review coverage or defect absence.
+- Input preparation caps the combined prompt at 180,000 characters and context at 8,000. Reports disclose truncation.
+- HTTP member timeout defaults to 90 seconds; Claude CLI seats default to 240 seconds. Provider fallback can add another request.
+- Eligible credential failures allow one OpenRouter reroute. Claude, Codex, and Grok identifiers are rejected on OpenRouter routes.
+- `can_push_fixes` defaults to true. Set it to false for review without fix commits.
+- `max_fix_cycles` and `max_council_runs` both default to 3. A review-budget stop fails the check and requests human attention.
+- The generated workflow only runs for owner-authored PRs and excludes Markdown and `docs/` changes.
+- To review prose, adjust workflow path exclusions and set Action input `review_prose: "true"`.
+- The mutation lens proposes changes; it does not execute mutation testing. It skips diffs without added test lines.
+- Fix commits trigger other pull-request workflows again. Use concurrency controls and budget for repeated CI runs.
+
+### What a fix cycle costs
+
+For five PR workflows and three chair fix commits:
+
+```
+1 human push        -> 5 workflow runs
+3 chair fix commits -> 15 more
+                       20 runs for one PR
+```
+
+```yaml
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+```
+
+### Lens routing
+
+| Lens | File kinds |
+| --- | --- |
+| scope | always (every nontrivial delta before review weight) |
+| correctness | source, test, CI, deps, agent instructions |
+| security | source, CI, deps, agent instructions |
+| maintainability | source, test, CI, agent instructions |
+| performance | source, style (CSS/SCSS/Less/Sass) |
+
+### Review weight
+
+| Weight | When | Council |
+| --- | --- | --- |
+| chair | style-only (CSS/SCSS/Less/Sass) | none; chair reviews alone |
+| light | tests and/or dependency manifests, no source | correctness plus security or maintainability |
+| core | ordinary source | correctness and security |
+| full | CI, agent instructions, high-risk paths (auth, payments, migrations, secrets), or an unparseable diff | whatever routing kept |
+
+Set `VCR_LENS_ROUTING=off` or `VCR_REVIEW_WEIGHT=off` to disable the corresponding reduction. `PR_CONTEXT_FILE` supplies the author's claim to scope review. The chair still judges claim alignment when scope is dropped.
+
+## Integration guides
+
+### GitHub Action setup
 
 ```bash
 npx vibecodereview init                        # writes .github/workflows/vibecodereview.yml
 npx vibecodereview secrets --repo owner/name   # prints the gh commands to set the keys
 ```
 
-Set at least `CLAUDE_CODE_OAUTH_TOKEN`, from `claude setup-token`. Every other
-key is optional and each one adds a council member.
-
-## Quick start
-
-Open a pull request. The check runs, the council reviews it through separate
-lenses, and the chair posts one review. There is no second step.
-
-```
-$ gh pr checks 423 -R pooriaarab/scripts
-vibecodereview	pass	7m15s
-```
-
-A member with no key drops out. With no keys at all the council step is skipped
-and Claude reviews alone, so a provider outage never blocks a pull request.
-
-## Why
-
-For a solo maintainer or a small team whose agents open more pull requests than
-anyone can read carefully. Review costs what it always did; generation no longer
-does.
-
-CodeRabbit and Devin review a diff and leave comments for you to act on. This
-one verifies each finding against the code first, drops what it cannot confirm,
-fixes what it can, pushes that fix to your branch, and posts one review instead
-of many. The check heals itself toward green.
-
-Not for you if you want a reviewer that never writes to your branch. It commits.
-
-Part of the **Vibe Suite**.
-
-## Demo
-
-A council of clay AI ninjas reviews a pull request — problem, deliberation,
-verdict, self-healing fix.
-
-▶ **[Watch the launch trailer](https://getvibe.dev/vibecodereview)** ·
-[16:9](assets/vibecodereview-trailer-16x9.mp4) · [9:16](assets/vibecodereview-trailer-9x16.mp4)
-
-## How it works
-
-A pull request opens. The action routes the delta to the lenses that can speak
-to the files it touches, and calls each provider directly. Every member returns
-findings independently. Claude chairs: it checks each claim against the code,
-drops what it cannot confirm, fixes what it can, pushes that commit to the
-branch, and posts one review.
-
-A trivial delta, such as a lockfile or docs-only push, skips the council
-entirely before any lens is dispatched. Set the action input `review_prose: "true"`
-to review `.md`, `.mdx`, `.txt`, and `.rst` changes with the full council.
-The default is `"false"`; only the exact value `"true"` enables prose review.
-Lockfiles, images, fonts, media, LICENSE, NOTICE, CHANGELOG, and editor noise stay inert.
-
-### The council
-
-
-| Member | Provider (called directly) | Secret | Lens |
-| --- | --- | --- | --- |
-| Chair | Claude (subscription OAuth, or your own API key) | `CLAUDE_CODE_OAUTH_TOKEN`, or `anthropic_api_key` | synthesis + conventions + tests + proof + fixes |
-| GPT / Codex | api.openai.com | `OPENAI_API_KEY` | correctness, silent failures |
-| Gemini | generativelanguage.googleapis.com | `GEMINI_API_KEY` | performance, type design |
-| Kimi | api.moonshot.ai | `MOONSHOT_API_KEY` | security |
-| DeepSeek V4 Flash | openrouter.ai | `OPENROUTER_API_KEY` | maintainability, data integrity |
-| GLM 5.3 Flash (scope) | openrouter.ai | `OPENROUTER_API_KEY` | scope, atomicity, and the evidence in the body |
-| Sonnet (mutation) | Claude OAuth seat | `CLAUDE_CODE_OAUTH_TOKEN` | can these tests fail at all — **off by default** |
-
-A member with no key drops out. No key at all → the council step is skipped, and
-Claude still reviews alone. Nothing here blocks the PR on a provider outage.
-
-### Lens routing
-
-Council members are dispatched by the **kind of file** a delta touches — never by diff
-size, line count, or file count. Each lens reviews only the kinds it can speak to:
-
-| Lens | File kinds |
-| --- | --- |
-| scope | always (every delta) |
-| correctness | source, test, CI, deps, agent instructions |
-| security | source, CI, deps, agent instructions |
-| maintainability | source, test, CI, agent instructions |
-| performance | source, style (CSS/SCSS/Less/Sass) |
-
-With `review_prose` off, a lockfile-only or docs-only push never reaches routing: the trivial-delta check
-above already skips the whole council, scope included, before any lens is dispatched.
-Routing only decides the roster once a delta has at least one non-inert path — a
-dependency-manifest-only push (`package.json`, `go.mod`, ...) keeps scope, correctness,
-and security; a test-only push keeps scope, correctness, and maintainability; a
-style-only push keeps scope and performance — review weight then drops that
-pair so the chair reviews CSS alone. An unparseable diff fails open and
-dispatches every lens. Dropped lenses are listed in the findings as "Lenses not dispatched".
-
-Set `VCR_LENS_ROUTING=off` to disable routing and dispatch the full roster.
-
-### Review weight
-
-Kind routing asks whether a lens can speak to the files. Review weight asks
-whether the delta needs more than one or two speakers. It runs after routing:
-
-| Weight | When | Council |
-| --- | --- | --- |
-| chair | style-only (CSS/SCSS/Less/Sass) | none — Claude reviews alone |
-| light | tests and/or dependency manifests, no source | correctness plus security or maintainability |
-| core | ordinary source | correctness and security |
-| full | CI, agent instructions, high-risk paths (auth, payments, migrations, secrets), or an unparseable diff | whatever routing kept |
-
-The chair still runs either way, and still judges whether the diff matches the
-claim. Scope drops on chair/light/core because that job is already the chair's.
-An unparseable diff fails open to `full`. Set `VCR_REVIEW_WEIGHT=off` on the
-`uses:` step to restore the routed roster with no further shrinking.
-
-The scope lens reads the PR's title, body, and linked issues from `PR_CONTEXT_FILE` when available to verify the diff matches the author's claim.
-
-A pull request also has to show its work: a visible change carries before and after
-screenshots, a command carries its result. The scope member judges that evidence against
-the diff, and the chair asks for the capture that would settle it. Neither of them ever
-produces the evidence itself. Set `require_proof: false` in a repo where no change is
-ever visible. The rule the check enforces lives in `pr-standards.md` in
-[pooriaarab/scripts](https://github.com/pooriaarab/scripts).
-
-Evidence has to cover the diff it claims to cover. The check flags a body whose
-`## How I verified` leaves untested a code path the PR changes, and one whose
-capture predates the newest commit touching a path that capture exercises. It does
-not ask for a recapture on every push: a commit that changes nothing the evidence
-shows leaves that evidence good. `scripts/proof-gate.test.sh` pins both paths the
-`require_proof` flag travels — the council scope lens and the chair's own bullet —
-because the first version gated only one of them.
-
-The chair also reads the PR against the fleet standard when the repo carries
-`.github/pr-standards.json`: branch and title shape, exactly one `Closes #N`, a
-`## How I verified` that names a command and its result, and the hard caps of 500 counted
-lines and 40 counted files. Being over a cap is reported, never "fixed" — the chair names
-the split it would make and leaves the work alone, because deleting code to fit a cap is
-worse than a large PR.
-
-**The chair never signs its commits with a model name.** Its fix commits carry no
-`Co-Authored-By:` trailer, because the same standard rejects model attribution in commit
-messages: a repo enforcing `pr-standards` would fail its own review bot, and the PR could
-not merge until a human squashed the bot's commit away. That happened twice in
-[pooriaarab/scripts](https://github.com/pooriaarab/scripts) before this was fixed.
-Attribution belongs in the PR body as `Assisted-by:`, written by the author.
-
-## Configure it in a repo
-
-```bash
-npx vibecodereview init          # writes .github/workflows/vibecodereview.yml
-npx vibecodereview secrets --repo owner/name   # prints the gh commands to set keys
-```
-
-Set at least `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`). Add provider
-keys to grow the council. Set them on **private** repos. `init` deliberately
-does not wire `anthropic_api_key` — a repo secret of that name, set for
-anything at all, would otherwise take the whole review onto metered billing.
-Add that line to the workflow by hand, as below.
+Set `CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token` for the normal chair path. Add council keys for the members you want. Commit the workflow and open an owner-authored source PR. Success posts a review from this run; inspect its coverage and check result.
 
 Or wire the action directly:
 
@@ -210,80 +172,9 @@ Or wire the action directly:
     vibetrace_ingest_token: ${{ secrets.VIBETRACE_INGEST_TOKEN }}
 ```
 
-When every Claude chair attempt fails, the chair falls back to CLI seats:
-Devin (`devin_cli_key`, SWE-2 Max), then Cursor (`cursor_api_key`), then Grok
-(`xai_api_key`). Each seat runs the same chair prompt, writes the same
-verdicts file, and posts with `gh`. A seat that exits without posting counts
-as failed. `devin_cli_key` is the `windsurf_api_key` value that
-`devin auth login` writes to `~/.local/share/devin/credentials.toml`. The
-Devin CLI does not read a key from the environment. Grok needs an xAI API key
-from console.x.ai: a SuperGrok login is a short-lived OIDC session, so it
-cannot run unattended in Actions.
+### Provider configuration
 
-Swap models without code: `council_models` input, or the `*_MODEL` env
-overrides (`OPENROUTER_MODEL=deepseek/deepseek-v4-flash`, etc.).
-
-### The mutation lens
-
-```yaml
-    mutation_lens: "true"
-```
-
-Five lenses read the diff. This sixth one reads the **tests** and asks the
-question that a green suite cannot answer: would any of these fail if the code
-under them were broken?
-
-For each test added or changed it names one concrete mutation to the code that
-test covers — a `path:line` and the exact replacement — and reports a finding
-when the test would survive it. It also reports the shapes that pass no matter
-what: a test and its code sharing the same helper so they agree regardless, an
-assertion that restates the implementation, a fixture that never reaches the
-path, a value compared against itself, and a test that can only fail by hanging
-(in CI that is a job timeout, not a red).
-
-Two honest limits:
-
-- **It proposes; it does not run.** A finding is a claim you can check in one
-  command, not a measured result. Applying the mutations needs a per-repo test
-  command and a sandbox, and that is a separate feature with a separate cost.
-- **Off by default, and skipped on a diff that adds no test lines.** There is no
-  question to ask about a documentation change, and the report says so rather
-  than staying silent — silence would read as "found nothing".
-
-`mutation_model` is the Claude CLI model name (default `claude-sonnet-5`).
-Mutation runs on a Claude OAuth seat, never OpenRouter. Set
-`MUTATION_PROVIDER=claude2` (or `claude3` / `claude4`) to pick a different
-token so it does not share the chair's primary subscription.
-
-### Claude subscription seats
-
-Every other seat needs a metered API key, and those are what run dry — a repo
-can sit at three-of-four members returning HTTP 429 while the posted summary
-still lists four reviewers, so a PR looks multi-model reviewed when only the
-chair ran.
-
-A Claude Code OAuth token is not an API bearer, so it cannot hold a normal
-seat. The `claude`, `claude2`, `claude3`, and `claude4` providers shell the
-Claude Code CLI (already installed for the chair) instead of POSTing, putting
-the cost on the subscription. Extra tokens (`CLAUDE_CODE_OAUTH_TOKEN_5` and
-up) become `claude5` automatically. **OpenRouter must never carry a Claude,
-Codex, or Grok model** — the engine skips those ids before the HTTP call.
-Those families have their own subscriptions. OpenRouter is DeepSeek / GLM
-only.
-
-```yaml
-council_models: >-
-  claude|claude-opus-5|Claude Opus 5|correctness,
-  claude2|claude-sonnet-5|Claude Sonnet 5|security,
-  claude3|claude-sonnet-5|Claude Sonnet 5|performance,
-  openrouter|deepseek/deepseek-v4-flash|DeepSeek V4 Flash|maintainability
-```
-
-The seats run with no tools, `--max-turns 1`, and a working directory outside
-the PR checkout — `claude -p` skips the workspace-trust prompt and would
-otherwise execute a repo-local `.claude/settings.json` hook with every secret
-in the step's environment. Set `CLI_TIMEOUT_MS` to change their budget
-(default 240000).
+`council_models` accepts CSV rows in `provider|model|Name|lens` form. Local runs use `COUNCIL_MODELS`. `claude` through `claude4` run Claude Code CLI seats. Additional tokens numbered 5 and above add matching seats. The Action can try Devin, Cursor, then Grok chair fallbacks after Claude attempts fail, when those credentials are supplied.
 
 ### An Anthropic API key instead of seats
 
@@ -300,33 +191,11 @@ lens. No OAuth seat is consumed, the seat probe does not run, and the key wins
 over any `claude_code_oauth_token` passed alongside it. The run logs which of
 the two it chose, on a `claude auth:` line, before it spends anything.
 
-Choose the key over seats when **who pays, and who the diff reaches, is the
-point**. A seat bills a person; an API key bills the organisation that issued
-it. Pass the key and no other provider key, and Anthropic is the only vendor
-the diff reaches — every other member drops out on its own missing key, and
-the CLI-seat fallback chair never runs on the key path. With
-the key, `claude` through `claude4` are slots on one account, differing only
-by model and lens. Choose seats when cost is the point: a seat bills a flat
-subscription you already pay for, and four of them rotate when one caps out.
-
-**Setting `ANTHROPIC_API_KEY` as a job-level environment variable does nothing,
-and that is deliberate.** Every Claude call strips it. The CLI prefers that
-variable over a claude.ai login, so a key left lying in the environment would
-move the whole review off the subscriptions and onto metered billing with
-nothing in the output to say so. The input makes that switch an act somebody
-performed rather than one they inherited. Locally, where there is no action to
+The API-key path disables other CLI-chair fallbacks. A bare job-level `ANTHROPIC_API_KEY` is stripped from Claude calls. Locally, where there is no action to
 read an input, the engine reads the name the action writes:
-`VCR_ANTHROPIC_API_KEY`.
-
-Pass neither and nothing changes: the chair fails and the result gate turns the
-check red, exactly as before.
+`VCR_ANTHROPIC_API_KEY`. `init` does not add the Anthropic input automatically; add it to the workflow when needed.
 
 ### Custom / OffRouter provider
-
-Point a council member at any OpenAI-compatible gateway: OpenRouter, a
-self-hosted proxy, or a local OffRouter endpoint. (OffRouter is a local
-router for coding agents; if it exposes an OpenAI-compatible
-`/v1/chat/completions`, set `CUSTOM_BASE_URL` to it.)
 
 ```bash
 export CUSTOM_BASE_URL=https://your-gateway.example/v1/chat/completions
@@ -334,124 +203,16 @@ export CUSTOM_API_KEY=...
 export COUNCIL_MODELS="custom|<model>|Name|lens"
 ```
 
-No `CUSTOM_BASE_URL` → the member skips with a note, same as a missing key.
+`CUSTOM_BASE_URL` is the complete `/chat/completions` endpoint URL.
 
-## What the chair's commits look like
-
-A fix the chair pushes is authored by `vibecodereview[bot]`, and it carries no
-model trailer. The Claude Code CLI adds `Co-Authored-By: Claude <model>` by
-default, and a fleet running the `pr-standards` check rejects a commit trailer
-that names a model or an agent — so the chair used to push a fix that turned the
-pull request red, on a commit its author could not amend because they did not
-make it.
-
-A `prepare-commit-msg` hook strips it, rather than a line in the chair's prompt:
-a prompt is a request to a model, and this has to hold every time. A
-`Co-authored-by` naming a human, or `vibecodereview` itself, is left alone.
-
-## What a fix cycle costs
-
-When the chair pushes a fix, that is a real commit on the PR branch, so GitHub
-raises a `synchronize` event. Every *other* workflow in the repo that triggers on
-`pull_request` runs again. The cost does not show up against this action — it
-shows up as extra runs of your test, lint, build and e2e workflows.
-
-The arithmetic, for a repo with five `pull_request` workflows and the default
-`max_fix_cycles: 3`:
-
-```
-1 human push        -> 5 workflow runs
-3 chair fix commits -> 15 more
-                       20 runs for one PR
-```
-
-Two things to set, especially if agents open most of your PRs:
-
-- **Lower `max_fix_cycles`** to 1 or 2 on high-volume repos. Fixes past the
-  second pass are usually the chair arguing with itself, and each one costs a
-  full pipeline.
-- **Give every `pull_request` workflow a `concurrency` group** so a fix commit
-  cancels the run it superseded instead of stacking beside it. `init` already
-  writes one into `vibecodereview.yml`; hand-written workflows often lack it.
-
-### The ceiling that stops a runaway
-
-`max_fix_cycles` caps how often the chair pushes. It caps nothing else, so a pull
-request can still be reviewed again and again while its author pushes, and the
-arithmetic above repeats every time. A pull request on its sixth review is not
-converging, and a seventh costs what the first cost.
-
-One ceiling stops it, on by default:
-
-| Input | Default | Counts |
-|---|---|---|
-| `max_council_runs` | `3` | reviews from `claude[bot]` on the pull request |
-
-Set it to `0` to disable.
-
-Over the ceiling, the action skips the council and the chair, labels the pull
-request `needs-human`, and leaves one comment saying which ceiling it hit and
-what to decide. It edits that comment rather than posting another. **The check
-fails.** A budget stop used to pass, on the reasoning that it is a routing
-decision rather than a verdict on the code, and that a red check would hide a
-real failure behind a bookkeeping one. In practice that made a spent budget and
-a completed review report identically: a PR page has no way to tell "this was
-reviewed" from "we already spent the budget on an earlier push" (fleet
-incident: pooriaarab/alongside#315). Green is the direction that gets merged
-without a second look, so it is the direction that must not lie. The label and
-comment still carry the *why* -- the failing check only carries the fact that
-no review happened on this push.
-
-Both numbers come from one API call. Real billable minutes need a request per
-run, which turns a guard against waste into a source of it — so the ceilings
-count runs, on the reasoning that every run of a workflow costs about what the
-last one did. `scripts/budget-guard.test.sh` pins the arithmetic, including the
-case that matters most: a failed lookup reads as "no spend yet", never as "out
-of budget", so an API blip cannot stop every review in the fleet.
-
-```yaml
-concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
-```
-
-Use `cancel-in-progress: true` for test, lint and scan workflows. Leave it
-`false`, or omit the group, on anything that deploys or runs migrations —
-cancelling those midway is worse than queueing.
-
-Set `can_push_fixes: false` to get review comments with no commits at all, which
-costs one pipeline per PR.
-
-## Set up across many repos
-
-`bin/rollout.mjs` rolls the action out to a fleet of repos. For each repo it
-sets the 5 secrets from your environment and opens one PR that adds the
-owner-gated workflow. It is idempotent: re-running re-sets secrets and
-reuses the branch and PR. It never merges.
-
-```bash
-node bin/rollout.mjs --dry-run owner/a owner/b   # preview; changes nothing
-node bin/rollout.mjs owner/a owner/b             # or REPOS="owner/a,owner/b"
-```
-
-Once the rollout PRs are green, merge them with `bin/merge-rollout.mjs`:
-
-```bash
-node bin/merge-rollout.mjs --lenient owner/a owner/b
-```
-
-It merges only PRs whose vibecodereview check passed. `--lenient` ignores
-unrelated red CI on the repo (safe: a rollout PR only adds one file). It
-never merges while the vibecodereview check is pending or failing.
-
-## Review a local diff before you push
+### Review a local diff before you push
 
 ```bash
 export OPENAI_API_KEY=... MOONSHOT_API_KEY=...   # whichever members you want
 vibecodereview review --base origin/main
 ```
 
-## Review open PRs across repos
+### Review open PRs across repos
 
 ```bash
 vibecodereview review-prs owner/a owner/b        # print findings per open PR
@@ -460,7 +221,7 @@ vibecodereview review-prs --post --repo owner/a  # also comment on each PR
 
 Needs an authenticated `gh`. One failing PR does not stop the batch.
 
-## As an MCP tool
+### As an MCP tool
 
 ```bash
 claude mcp add vibecodereview -- node /path/to/vibecodereview/mcp/server.mjs
@@ -468,17 +229,59 @@ claude mcp add vibecodereview -- node /path/to/vibecodereview/mcp/server.mjs
 
 Exposes one tool, `council_review(diff)`. Provider keys come from the server env.
 
-## Notes
+### Set up across many repos
 
-- Subscriptions (codex-personal, gemini-personal, muse) don't reach a CI runner —
-  CI uses each provider's **API key**. Only Claude's OAuth token ports to CI.
-- Rotate any key you paste into a chat or terminal history.
-- **Vibetrace Ingestion**: Supply the optional `VIBETRACE_INGEST_URL` and `VIBETRACE_INGEST_TOKEN` as repository secrets to forward completed council run trace metrics and records to a centralized telemetry ingest server. When unset, telemetry traces are stored under `RUNNER_TEMP` as JSONL files.
+```bash
+node bin/rollout.mjs --dry-run owner/a owner/b   # preview; changes nothing
+node bin/rollout.mjs owner/a owner/b             # or REPOS="owner/a,owner/b"
+```
 
-## Contributing
+### Releases
 
-See [CONTRIBUTING.md](https://github.com/pooriaarab/.github/blob/main/CONTRIBUTING.md).
+`bin/rollout.mjs` supports dry runs and opens setup PRs without merging. Review its target list and secret handling before use. Releases use immutable `vX.Y.Z` tags plus a moving `vX` tag. Moving `v1` updates Action consumers that follow it. `bin/release.mjs` prints a plan by default; `--apply` pushes release tags. It does not change the committed package version. The publish workflow derives the npm version from the triggering tag.
+
+### What the chair's commits look like
+
+Fix commits use `vibecodereview[bot]`. A commit hook removes model co-author trailers and preserves human co-authors. Optional `file_unfixed_findings` files unresolved candidates as triage issues; it defaults to false.
+
+## Status
+
+The source manifest is version 0.1.1; published versions are stamped from release tags. Check npm and pinned Action tags for deployed versions. Local tests do not establish live provider availability. Use [GitHub issues](https://github.com/pooriaarab/vibecodereview/issues) for support. Run `npm test` for the Node test suite and council selfcheck. CI also runs oxlint and duplicate-code checks.
+
+## FAQ
+
+### Which integrations are verified?
+
+vibecodereview has implemented HTTP, CLI-seat, GitHub, and trace-delivery paths. This rewrite verifies source and offline tests, not live provider credentials.
+
+### Does vibecodereview provide a managed review service?
+
+vibecodereview runs through your configured Action runner or local process. You supply provider credentials and pay their costs.
+
+### How is vibecodereview different from CodeRabbit?
+
+vibecodereview exposes an explicit council roster and a chair workflow in its source. [CodeRabbit](https://docs.coderabbit.ai/) provides review workflows across pull requests, CLI, and IDE surfaces.
+
+### How is vibecodereview different from Devin Review?
+
+vibecodereview runs its council through your chosen provider configuration. [Devin Review](https://docs.devin.ai/work-with-devin/devin-review) provides its own pull-request review interface and workflow.
+
+### Does vibecodereview always push fixes?
+
+vibecodereview permits chair fix commits by default in the Action. Set `can_push_fixes: false` to disable them; local council review only prints findings.
+
+### What happens when a provider key is missing?
+
+vibecodereview can use a configured OpenRouter equivalent or record a skip. Missing council coverage does not mean the diff has no defects.
+
+### Does a passing council script mean my PR was reviewed?
+
+vibecodereview's council engine exits zero even on errors. Read coverage notes and the Action result gate before treating the run as completed review.
+
+### Does the mutation lens run my tests?
+
+vibecodereview's mutation lens proposes code changes that tests should catch. It does not apply those changes or measure mutation-test results.
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT.
