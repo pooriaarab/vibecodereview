@@ -1,6 +1,6 @@
 {
   "name": "vibecodereview",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "publishConfig": {
     "access": "public"
   },
@@ -30,5 +30,21 @@
     "url": "git+https://github.com/pooriaarab/vibecodereview.git"
   },
   "license": "MIT",
-  "keywords": ["code-review", "pull-request", "GitHub Actions", "mcp", "cli", "OpenAI", "Google Gemini", "Moonshot AI", "OpenRouter", "Claude Code", "Devin", "Cursor", "Grok", "multi-model", "review-automation"]
+  "keywords": [
+    "code-review",
+    "pull-request",
+    "GitHub Actions",
+    "mcp",
+    "cli",
+    "OpenAI",
+    "Google Gemini",
+    "Moonshot AI",
+    "OpenRouter",
+    "Claude Code",
+    "Devin",
+    "Cursor",
+    "Grok",
+    "multi-model",
+    "review-automation"
+  ]
 }
