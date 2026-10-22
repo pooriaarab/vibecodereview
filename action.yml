@@ -896,6 +896,7 @@ runs:
       continue-on-error: true
       uses: anthropics/claude-code-action@v1
       with:
+        path_to_claude_code_executable: ${{ env.VCR_CLAUDE_EXECUTABLE }}
         anthropic_api_key: ${{ inputs.anthropic_api_key }}
         use_commit_signing: true
         # Empty on the normal path, so the OIDC exchange still runs and the
@@ -913,6 +914,7 @@ runs:
       continue-on-error: true
       uses: anthropics/claude-code-action@v1
       with:
+        path_to_claude_code_executable: ${{ env.VCR_CLAUDE_EXECUTABLE }}
         claude_code_oauth_token: ${{ inputs.claude_code_oauth_token }}
         use_commit_signing: true
         # Empty on the normal path, so the OIDC exchange still runs and the
@@ -946,6 +948,7 @@ runs:
       continue-on-error: true
       uses: anthropics/claude-code-action@v1
       with:
+        path_to_claude_code_executable: ${{ env.VCR_CLAUDE_EXECUTABLE }}
         claude_code_oauth_token: ${{ inputs.claude_code_oauth_token_2 }}
         use_commit_signing: true
         # Empty on the normal path, so the OIDC exchange still runs and the
@@ -969,6 +972,7 @@ runs:
       continue-on-error: true
       uses: anthropics/claude-code-action@v1
       with:
+        path_to_claude_code_executable: ${{ env.VCR_CLAUDE_EXECUTABLE }}
         claude_code_oauth_token: ${{ inputs.claude_code_oauth_token_3 }}
         use_commit_signing: true
         # Empty on the normal path, so the OIDC exchange still runs and the
@@ -992,6 +996,7 @@ runs:
       continue-on-error: true
       uses: anthropics/claude-code-action@v1
       with:
+        path_to_claude_code_executable: ${{ env.VCR_CLAUDE_EXECUTABLE }}
         claude_code_oauth_token: ${{ inputs.claude_code_oauth_token_4 }}
         use_commit_signing: true
         # Empty on the normal path, so the OIDC exchange still runs and the

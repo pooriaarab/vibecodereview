@@ -29,3 +29,12 @@ else
     https://claude.ai/install.sh -o "$RUNNER_TEMP/install-claude.sh"
   bash "$RUNNER_TEMP/install-claude.sh"
 fi
+
+# The chair action otherwise downloads its own copy on every failover attempt.
+# Verify the shared executable before bypassing that automatic installation.
+claude_executable="$(command -v claude || true)"
+if [ -z "$claude_executable" ]; then
+  claude_executable="$HOME/.local/bin/claude"
+fi
+"$claude_executable" --version
+printf 'VCR_CLAUDE_EXECUTABLE=%s\n' "$claude_executable" >> "$GITHUB_ENV"
