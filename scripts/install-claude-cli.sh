@@ -25,7 +25,25 @@ else
   # fallbacks gets a turn. --retry-all-errors is the flag that makes a reset
   # retryable: on its own --retry covers transient HTTP statuses and
   # timeouts, and a reset is neither.
-  curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors \
-    https://claude.ai/install.sh -o "$RUNNER_TEMP/install-claude.sh"
-  bash "$RUNNER_TEMP/install-claude.sh"
+  if curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors \
+    https://claude.ai/install.sh -o "$RUNNER_TEMP/install-claude.sh" &&
+    bash "$RUNNER_TEMP/install-claude.sh"; then
+    : # Native installation succeeded.
+  else
+    # The native endpoint can rate-limit an entire runner pool. Use the
+    # official registry package at a fixed version, without sudo. npm keeps
+    # its normal integrity-checked download cache for subsequent cold runs.
+    echo "Native installer failed; trying pinned official npm package."
+    npm install --global --prefix "$HOME/.local" --no-audit --no-fund \
+      @anthropic-ai/claude-code@2.1.308
+  fi
 fi
+
+# The chair action otherwise downloads its own copy on every failover attempt.
+# Verify the shared executable before bypassing that automatic installation.
+claude_executable="$(command -v claude || true)"
+if [ -z "$claude_executable" ]; then
+  claude_executable="$HOME/.local/bin/claude"
+fi
+"$claude_executable" --version
+printf 'VCR_CLAUDE_EXECUTABLE=%s\n' "$claude_executable" >> "$GITHUB_ENV"
